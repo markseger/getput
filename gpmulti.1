@@ -1,0 +1,107 @@
+.TH GPMASTER 1 "APRIL 2013" LOCAL "gpmulti" -*- nroff -*-
+.SH NAME
+gpmulti - run swift benchmarking getput tool on multiple systems in parallel
+
+.SH SYNOPSIS
+
+gpmulti --creds file --nodes filename --numnodes [--sshkey key ] [--sync secs]
+options...
+
+.SH DESCRIPTION
+
+gpmulti runs the getput benchmarking tool on multiple client nodes.  Unlike 
+getput itself which can run multiple combinations of tests on a single machine, 
+gpmulti instructs getput to run a single test at a time so that it can coordinate
+their synchronization across multiple machines.
+
+.SH OPTIONS
+
+Almost all switches and their values are passed as-is to getput with the
+exception of the following which actually control the operation of gpmulti
+itself:
+
+.B --creds file
+.RS
+For details of the creds file format see the getput man page.
+.RE
+
+.B --nodes filename
+.RS
+This names a file containing the addresses mamchines on which to run the getput 
+command on via ssh.  If you want to run ssh with a different username other 
+than the one currently in use, include --username.
+.RE
+
+.B --numnodes number
+.RS
+Gpmulti does not necessarily use all the nodes in the specified filename but rather
+uses this number to tell it how many to use, making it possible to call gpmulti from
+a higher level script and vary this number over multiple passes.
+.RE
+
+.B --sshkey key
+.RS
+An optional switch to be used if you don't have passwordless ssh configured 
+but rather use keys.  Pass the public key associated with all the addresses 
+here, noting you MUST use the same key for all client machines.
+.RE
+
+.B --sync secs
+.RS
+This optional switch allows you to coordinate the start times of getput across
+multiple nodes, its default value is 5.  Gpmulti calculates the time, that number 
+of seconds from now as a UCT timestamp and passes that to getput as a time to start.
+Note that the getput --sync time, which is rarely used when running it by itself,
+is a UCT time whereas this --sync is seconds from now.
+.RE
+
+.B --username name
+.RS
+If specified, use this for the username in the ssh command.
+.RE
+.RE
+
+Additional Required Switches
+
+Since this script runs getput, one needs to make sure all its required switches
+are also specified, specifically:
+
+.B -c container, -o object, -n number and/or -r runtime, -s bytes, -t test(s)
+.RS
+See the getput manpage for the descriptions of these switches
+.RE
+
+Optional Switches
+
+There are a lot of these and none are required to run.
+
+.B --nocompress, --cont-nodelete, --ctype, --latexc, --ldist, --logops, --nohead, --objopts,
+--preauthtoken, --pretest, --procs, --proxies, --quiet, --runtime, --utc, --warnexit
+.RS
+See the getput manpage for the descriptions of these switches as well as their default values.
+.RE
+
+Development/Testing
+
+.B -d | --debug mask
+.RS
+This switch is provided for testing and debugging, typically used when something
+doesn't run as expected. To use it see the list of values in the beginning of
+getput and add together all those you're intested in using.  The best one to start
+with is 1, to see how gpmulti is initializing and 2 to see what commands its running
+or 3 to see both.  There are many more combinations.
+.RE
+
+.B --flavor string
+.RS
+Occasionally one may wish to experiment with a hacked version of getput and to
+be able to run that version without fear of losing the original.  Not a problem,
+simply rename getput to something like getput-xxx and run gpmulti with --flavor xxx.  It 
+with then run the script named getput-flavor via ssh.
+.RE
+
+.SH AUTHOR
+
+This program was written by mark Seger (mjseger@gmail.com)
+.br
+Copyright 2013 Hewlett-Packard Development Company, LP

@@ -1,0 +1,37 @@
+0.0.7	Feb 18, 2014
+  - Added support for using swiftclient's close() method which was not
+    available with V1.5
+  - expects transaction IDs to always be there now
+
+0.0.6  Jan 7, 2013
+  - sleep for 0.01 secs (without multiplying by instance) for container
+    creation as including it had an unwanted multiplicative effect
+  - include container names with -d32
+  - added getting-started.txt to docs/
+
+0.0.5  Dec 9, 2013
+  - wasn't proerly loading tenant_id and tenant_name from creds file
+  - the test for newAPI shouldn't just be based on the connection
+    succeeding as I've seen it succeed and still no transIDs available
+    so make sure 'response_dict' is an arg to put_object
+
+0.0.4
+  - looks like I messed up the syntax of the unexpected error printing
+    around line 1650,  I really don't like pep8!
+
+0.0.3
+  - if any of cname, oname, creds or nodes are not specified in conf file
+    use 'type' to generate default values.  consider us of  --dry to verify
+  - new conf option: csv=1 will report all results in csv format
+
+0.0.2
+  - removed some extraneous debugging print statements from getput
+  - added command line to log file
+  - added a test inside the ping loop to measure clock drift and make
+    sure within acceptable limits
+  - remove py extentions after moving into place
+  - added 'getting started doc', still needs gpsuite section
+
+0.0.1    Oct 29, 2013
+  - Initial Release
+

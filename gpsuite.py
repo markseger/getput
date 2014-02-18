@@ -1,0 +1,702 @@
+#!/usr/bin/python -u
+
+# Copyright 2013 Hewlett-Packard Development Company, L.P.
+# Use of this script is subject to HP Terms of Use at
+# http://www8.hp.com/us/en/privacy/terms-of-use.html.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#    http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# debug
+#    1 - print some basic stuff
+#    2 - show commands as they are executed
+#    4 - test run: just show commands that would be executed
+#    8 - show stanza processing
+#   16 - show ping commands
+#   32 - disable ping/time tests
+#   64 - tell gpmulti to append to an exe log
+#  128 - tell getput to append to an exe log
+#  256 - print results to terminal instead of log
+
+import glob
+import os
+import re
+import sys
+import time
+import subprocess
+from optparse import OptionParser, OptionGroup
+
+
+def error(text):
+    print text
+    sys.exit()
+
+
+def main(argv):
+
+    global options
+
+    parser = OptionParser(add_help_option=False)
+    group0 = OptionGroup(parser, 'these are the basic switches')
+    group0.add_option('--config',      dest='cfile',
+                      help='config file', default='')
+    group0.add_option('--drift',      dest='drift',
+                      help='yell if clocks drift more than this',
+                      default='2')
+    group0.add_option('--dryrun',      dest='dryrun',
+                      help='show params, command to be executed and exit',
+                      action='store_true')
+    group0.add_option('--help', dest='help',
+                      help='show this help message and exit',
+                      action='store_true')
+    group0.add_option('--list',      dest='list',  action='store_true',
+                      help='list available suites')
+    group0.add_option('--logmod',    dest='logmod',
+                      help='logfile name modifier', default='')
+    group0.add_option('--repeat',    dest='repeat',
+                      help='repeat suite this number of times',
+                      default='1')
+    group0.add_option('--suite',     dest='suite',     default=None,
+                      help='name of test suite to run')
+    group0.add_option('--version',   dest='version',
+                      help='print version and exit',
+                      action='store_true')
+    parser.add_option_group(group0)
+
+    group1 = OptionGroup(parser, 'these override settings in conf file')
+    group1.add_option('--logname',   dest='logname',
+                      help='use this name for results log')
+    group1.add_option('--maxhours',  dest='maxhours',
+                      help='terminate testing after fractional number hours')
+    group1.add_option('--maxnodes',  dest='maxnodes',
+                      help='maximum number of client test nodes to use')
+    group1.add_option('--nodefill',  dest='nodefill',
+                      help='fill each node with this number of procs')
+    group1.add_option('--options',   dest='options',
+                      help="either add to or replace 'options' settings")
+    group1.add_option('--procs',     dest='procs',
+                      help='set of procs to use')
+    group1.add_option('--runtime',   dest='runtime',
+                      help='runtime')
+    group1.add_option('--sizes',     dest='sizes',
+                      help='set of object sizes to use')
+    parser.add_option_group(group1)
+
+    group2 = OptionGroup(parser, 'development/testing')
+    group2.add_option('-d',   dest='debug',
+                      help='debug mask', default='0')
+    parser.add_option_group(group2)
+
+    try:
+        (options, args) = parser.parse_args(argv)
+    except:
+        error('invalid command')
+        sys.exit()
+
+    if options.help:
+        parser.print_help()
+        sys.exit()
+
+    if options.version:
+        error('gpsuite V%s\n\n%s' % (version, copyright))
+        sys.exit()
+
+    if options.list and options.suite:
+        error('use --list OR --suite')
+
+
+def config_parse(file, suite=None):
+
+    global vars
+
+    suite = options.suite
+    if debug & 9:
+        print 'Loading config from %s' % file
+
+    try:
+        conf = open(file, 'r')
+    except IOError:
+        error("Couldn't open config file: %s" % file)
+
+    found = 0
+    for line in conf:
+
+        # in case file doesn't end in newline
+        if re.search('\n$', line):
+            line = line[:-1]
+
+        # ignore whitespace and comments
+        if re.match('\s*$|#', line):
+            continue
+
+        #    S t a n z a    P r o c e s s i n g
+
+        match = re.match('\[(.*)\]', line)
+        if match:
+            # if already processed the stanza we're looking for, we're done
+            if found == 1:
+                break
+
+            # we've got our stanza so not process the body
+            stanza = match.group(1)
+            if not stanza in vars:
+                vars[stanza] = {}
+
+            if suite and stanza == suite:
+                found = 1
+            continue
+
+        #    I n c l u d e    V a l s    F r o m   O t h e r    S t a n z a s
+
+        # include values from other stanza
+        match = re.match('include\s+(\S+)', line)
+        if match:
+            insert_from = match.group(1)
+            if insert_from not in vars:
+                error("cannot insert values for '@%s', because not found"
+                      % insert_from)
+            if debug & 8:
+                print '  inserting values from', insert_from
+            for var in vars[insert_from]:
+                if debug & 8:
+                    print "    %s=%s" % (var, vars[insert_from][var])
+                vars[stanza][var] = vars[insert_from][var]
+            continue
+
+        #    P r o c e s s    V a l u e s    F o r    S u i t e
+
+        match = re.match('(.*?)\s*=\s*(.*)', line)
+        if not match:
+            error('invalid entry in config file: %s' % line)
+        var = match.group(1)
+        val = match.group(2)
+        try:
+            if re.match('maxnodes|runtime', var):
+                value = int(val)
+            elif re.match('maxhours', var):
+                value = float(val)
+            else:
+                value = val
+        except ValueError:
+            error("Invalid value found in config file for: %s  value: %s"
+                  % (var, val))
+
+        if var == 'options' and value[0] == '+':
+            if 'options' not in vars[stanza]:
+                error('options = +... for suite %s, ' % stanza + \
+                          'but no previous value found')
+            value = '%s %s' % (vars[stanza][var], value[1:])
+
+        vars[stanza][var] = value
+        if debug & 8 and stanza == suite:
+            print "    %s=%s" % (var, val)
+
+
+def config_check():
+
+    if debug & 1:
+        print 'Checking config for', options.suite
+
+    suite = options.suite
+
+    # overrides
+    if options.nodefill:
+        vars[suite]['nodefill'] = options.nodefill
+    if options.maxhours:
+        vars[suite]['maxhours'] = options.maxhours
+    if options.maxnodes:
+        vars[suite]['maxnodes'] = options.maxnodes
+    if options.sizes:
+        vars[suite]['sizes'] = options.sizes
+    if options.procs:
+        vars[suite]['procs'] = options.procs
+    if options.runtime:
+        vars[suite]['runtime'] = options.runtime
+
+    #  go back and recheck data to make sure not corrupted by invalid data
+    for var in ['nodefill', 'maxhours', 'maxnodes',
+                'sizes', 'procs', 'runtime']:
+        if var in vars[suite]:
+            try:
+                if re.match('nodefill|maxnodes|runtime', var):
+                    temp = int(vars[suite][var])
+                elif re.match('maxhours', var):
+                    temp = float(vars[suite][var])
+            except ValueError:
+                error("invalid value for --%s: %s" % (var, vars[suite][var]))
+
+    # options is special.  normally we just replace value from conf file,
+    # BUT if it already defined and --options starts with a +, append
+    # also, we want to preserve the old name for later reporting
+    if options.options:
+        if 'options' in vars[suite]:
+            vars[suite]['options(old)'] = vars[suite]['options']
+        else:
+            vars[suite]['options(old)'] = ''
+
+        opts = options.options
+        if not re.match('\+', opts):
+            vars[suite]['options'] = options.options
+        elif not 'options' in vars[suite]:
+            vars[suite]['options'] = opts[1:]
+        else:
+            vars[suite]['options'] += ' %s' % opts[1:]
+
+    # the ONLY defaults if nowhere else
+    if not 'maxnodes' in vars[suite]:
+        vars[suite]['maxnodes'] = '1'
+    if not 'procs' in vars[suite]:
+        vars[suite]['procs'] = '1'
+
+    # To avoid problems with asymmetrical results later, when filling nodes
+    # make sure all numbers of processes an even multiple or else ignore them
+    if 'nodefill' in vars[suite]:
+        proc_list = ''
+        fill = int(vars[suite]['nodefill'])
+        for proc in vars[suite]['procs'].split(','):
+            if int(int(proc) / fill) * fill == int(proc):
+                proc_list += '%s,' % proc
+            else:
+                error(">>> Proc specifies %s which is " % proc + \
+                    "not multiple of 'nodefill: %d' so ignoring" % fill)
+        vars[suite]['procs'] = proc_list[:-1]
+
+    # maxnodes/procs have ultimate default of 1 so don't need to check
+    # comment is optional
+    required = []
+    required.append('type')
+    required.append('sizes')
+    required.append('runtime')
+    required.append('maxnodes')
+    required.append('procs')
+
+    for name in required:
+        if not name in vars[suite]:
+            error("'%s' not defined in %s OR as a switch"
+                  % (name, options.cfile))
+
+    # if any of the following not defined set a default value based
+    # on 'type' which then must always be defined
+    for type in ('cname', 'oname'):
+        if not type in vars[suite]:
+            vars[suite][type] = '%s' % vars[suite]['type']
+    for type in ('creds', 'nodes'):
+        if not type in vars[suite]:
+            vars[suite][type] = '%s-%s' % (vars[suite]['type'], type)
+
+    if not 'sizes' in vars[suite]:
+        error('required variable not defined: --sizes')
+    if not 'runtime' in vars[suite]:
+        error('required variable not defined: --runtime')
+    if not 'tests' in vars[suite]:
+        vars[suite]['tests'] = 'p,g,d'
+
+    # make sure required files exist
+    if not os.path.isfile(vars[suite]['creds']):
+        error("%s doesn't exist" % vars[suite]['creds'])
+    if not os.path.isfile(vars[suite]['nodes']):
+        error("%s doesn't exist" % vars[suite]['nodes'])
+
+    # finally for consistency, if we override any switches in the options, be
+    # sure to override them in vars so they display properly in the output log
+    if 'options' in vars[suite]:
+        switches = vars[suite]['options'].split()
+        for i in range(len(switches)):
+            if switches[i][0] != '-':
+                continue
+
+            # single char switches are messy because optional space
+            if re.match('-c', switches[i]):
+                vars[suite]['cname'] = switches[i + 1] \
+                    if len(switches[i]) == 2 else switches[i][2:]
+            elif re.match('-o', switches[i]):
+                vars[suite]['oname'] = switches[i + 1] \
+                    if len(switches[i]) == 2 else switches[i][2:]
+            elif re.match('-p', switches[i]):
+                vars[suite]['procs'] = switches[i + 1] \
+                    if len(switches[i]) == 2 else switches[i][2:]
+            elif re.match('-s', switches[i]):
+                vars[suite]['sizes'] = switches[i + 1] \
+                    if len(switches[i]) == 2 else switches[i][2:]
+            elif re.match('-t', switches[i]):
+                vars[suite]['tests'] = switches[i + 1] \
+                    if len(switches[i]) == 2 else switches[i][2:]
+
+            # multichar switches much easier, but only check minimal names
+            if re.match('--conf', switches[i]):
+                vars[suite]['cname'] = switches[i + 1]
+            if re.match('--cr', switches[i]):
+                vars[suite]['creds'] = switches[i + 1]
+            elif re.match('--nod', switches[i]):
+                vars[suite]['nodes'] = switches[i + 1]
+            elif re.match('--nu', switches[i]):
+                vars[suite]['maxnodes'] = switches[i + 1]
+            elif re.match('--on', switches[i]):
+                vars[suite]['oname'] = switches[i + 1]
+            elif re.match('--proc', switches[i]):
+                vars[suite]['procs'] = switches[i + 1]
+            elif re.match('--prox', switches[i]):
+                vars[suite]['proxy'] = switches[i + 1]
+            elif re.match('--si', switches[i]):
+                vars[suite]['sizes'] = switches[i + 1]
+            elif re.match('--sy', switches[i]):
+                vars[suite]['synctime'] = switches[i + 1]
+            elif re.match('--t', switches[i]):
+                vars[suite]['tests'] = switches[i + 1]
+
+    tfile = open(vars[suite]['nodes'], 'r')
+
+    ping_fail = 0
+    if not debug & 32:
+        num = 0
+
+        ssh_base = 'ssh '
+        if 'sshkey' in vars[suite]:
+            ssh_base += '-i %s ' % vars[suite]['sshkey']
+
+        time0 = time.time()
+        min_time = 9999999999
+        max_time = 0
+        for node in tfile:
+            if re.match('#|\s*$', node):
+                continue
+
+            num += 1
+            if num > int(vars[suite]['maxnodes']):
+                break
+
+            node = node[:-1]
+            command = 'ping -c1 %s 2>/dev/null 1>&2' % node
+            if debug & 16:
+                print command
+            if (os.system(command)):
+                print "  Could not ping node %s in %s" \
+                    % (node, vars[suite]['nodes'])
+                ping_fail += 1
+
+            # doing as part of ping loop will double overall test time and
+            # make drift timing less sensitive.
+            command = ssh_base
+            if 'username' in vars[suite]:
+                command += '%s@' % vars[suite]['username']
+
+            command += '%s date ' % node
+            command += '+%s 2>/dev/null'
+            if debug & 16:
+                print command
+            utc_time = int(subprocess.check_output(command, shell=True))
+            if utc_time < min_time:
+                min_time = utc_time
+            if utc_time > max_time:
+                max_time = utc_time
+
+        # very rough, but see how long the ssh commands took and subtract from
+        # clock drift and if resultant drift greater than --drift, give up!
+        if ((max_time - min_time) - (time.time() - time0)) > drift:
+            error('looks like the node clocks may have drifted more than ' + \
+                      ' %d seconds' % drift)
+
+    if ping_fail:
+        error("ping test failed so you must fix the problem to continue")
+
+
+def command_exec(command):
+    errlog = '/tmp/gpsuite-%s.err' % \
+        (time.strftime('%Y%m%d-%H%M%S', time.gmtime()))
+    command += " 2>%s" % errlog
+    try:
+        if debug & 2:
+            print "Command: %s" % command
+        results = subprocess.check_output(command, shell=True)
+        print results,
+        os.remove(errlog)
+    except:
+        print "Command Failed: %s  See %s for details" % (command, errlog)
+
+
+def findbin(name):
+    """find an executable in local dir OR /usr/bin"""
+    for dir in ('.', '/usr/bin'):
+        for ext in ('', '.py'):
+            candidate = '%s/%s%s' % (dir, name, ext)
+            if os.path.isfile(candidate):
+                return(candidate)
+    return('')
+
+
+if __name__ == "__main__":
+
+    version = '0.0.7'
+    copyright = 'Copyright 2013 Hewlett-Packard Development Company, L.P.'
+
+    # save command line before anyone else touches it
+    command_line = ''
+    for arg in sys.argv:
+        command_line += "%s " % arg
+
+    main(sys.argv[1:])
+
+    debug = int(options.debug)
+    drift = int(options.drift)
+    repeat = int(options.repeat)
+    suite = options.suite
+
+    gpmulti_bin = findbin('gpmulti')
+    if gpmulti_bin == '':
+        error("can't find gpmulti!!!")
+
+    vars = {}
+    if not options.cfile:
+
+        # always load gpsuite.conf first.  useful to see if dir exists
+        # for development/testing
+        if os.path.exists('/etc/gpsuite.d'):
+            if os.path.exists('/etc/gpsuite.d/gpsuite.conf'):
+                config_parse('/etc/gpsuite.d/gpsuite.conf', suite)
+            for file in sorted(glob.glob('/etc/gpsuite.d/*.conf')):
+                if file == '/etc/gpsuite.d/gpsuite.conf':
+                    continue
+                config_parse(file, suite)
+
+        # now load any additional conf files found in default dir
+        for file in sorted(glob.glob('gpsuite-*.conf')):
+            config_parse(file, suite)
+    else:
+        config_parse(options.cfile, suite)
+
+    if options.list:
+        for test in sorted(vars):
+            if 'comment' in vars[test]:
+                print "%-20s  %s" % (test, vars[test]['comment'])
+            else:
+                print test
+
+        sys.exit()
+
+    # only required when not --list
+    if not options.suite:
+        error('--suite required')
+    if suite not in vars:
+        error('unknown suite name: %s' % suite)
+    config_check()
+
+    # extra work but we really want to preserve what's been done with --options
+    if options.dryrun:
+        for param in sorted(vars[suite]):
+            if param == 'options' and options.options:
+                mod = '(new)'
+            else:
+                mod = ''
+            pname = '%s%s' % (param, mod)
+            print "%-12s = %s" % (pname, vars[suite][param])
+
+    maxnodes = int(vars[suite]['maxnodes'])
+
+    # build name of result logfile
+    timestamp = time.strftime('%Y%m%d-%H%M%S')
+    if not options.logname:
+        outname = '%s-%s' % \
+            (timestamp, options.suite)
+        if options.logmod != '':
+            outname += '-%s' % options.logmod
+        outname += '.log'
+    else:
+        outname = options.logname
+
+    dirname = '.'
+    if 'resdir' in vars[suite]:
+        dirname = vars[suite]['resdir']
+        if 'restree' in vars[suite]:
+            dirname += '/gpsuite-%s-%s' % (timestamp, options.suite)
+            if options.logmod != '':
+                dirname += '-%s' % options.logmod
+    outname = '%s/%s' % (dirname, outname)
+
+    # if a real run, we need a results log
+    if not options.dryrun and not debug & 256:
+        if not os.path.exists(dirname):
+            os.makedirs(dirname)
+        try:
+            ofile = open(outname, 'a')
+        except:
+            error("couldn't open '%s' for writing" % outname)
+
+        # only if not a dry run, and for now if not --logname
+        print "Writing test results to", outname
+        if not options.logname and not debug & 256:
+            ofile.write('#%-12s: %s\n' % ('gpsuite', version))
+            for param in sorted(vars[suite]):
+                if param == 'options' and options.options:
+                    mod = '(new)'
+                else:
+                    mod = ''
+                pname = '%s%s' % (param, mod)
+                ofile.write("#%-12s: %s\n" % (pname, vars[suite][param]))
+            ofile.write('#\n#Command     : %s\n\n' % command_line)
+            ofile.flush()
+
+    try:
+        creds = vars[suite]['creds']
+        conf = open(creds, 'r')
+    except:
+        error('F', "Couldn't open '%s'" % creds)
+    for line in conf:
+        if re.match('#', line):
+            continue
+        line = line[:-1]
+        name, value = line.split('=')
+
+        # load creds into our environment which later we pas
+        # to the subprocess when running gpmulti
+        # sometimes creds file has 'export var=...'
+        name = re.sub('export\s+', '', name)
+        name = name.rstrip()
+        value = value.strip()
+        value = re.sub('[\'\"]+', '', value)
+        os.environ[name] = value
+
+    if 'maxhours' in vars[suite]:
+        repeat = 99999
+        endsecs = int(time.time()) + float(vars[suite]['maxhours']) * 3600
+        if debug & 1:
+            print 'Terminate testing after %s hour(s)' \
+                % vars[suite]['maxhours']
+
+    if 'suiteinit' in vars[suite]:
+        command = '%s -s%s' % (vars[suite]['suiteinit'], suite)
+        command_exec(command)
+
+    ldist = 1
+    for i in range(repeat):
+        for size in vars[suite]['sizes'].split(','):
+            if re.search('[mg]', size):
+                ldist = 0
+
+            # always do header first pass and if not repeating, whenever
+            # we change object sizes
+            if i == 0 or not options.repeat:
+                nohead = ''
+
+            for numprocs in vars[suite]['procs'].split(','):
+                procs = int(numprocs)
+                if 'nodefill' in vars[suite]:
+                    nodefill = int(vars[suite]['nodefill'])
+                    if procs <= nodefill:
+                        ppernode = procs
+                        nodes = 1
+                    else:
+                        ppernode = nodefill
+                        nodes = int(procs / ppernode)
+                        if nodes > maxnodes:
+                            break
+                else:
+                    if procs <= maxnodes:
+                        ppernode = 1
+                        nodes = procs
+                    else:
+                        ppernode = int((procs - 1) / maxnodes + 1)
+                        nodes = int((procs - (ppernode - 1) * maxnodes))
+                #print "Size: %s Procs: %d  Nodes: %d  Pernode: %d" \
+                #    % (size, procs, nodes, ppernode)
+
+                command = '%s -c%s -o%s -s%s -t%s' % \
+                    (gpmulti_bin, vars[suite]['cname'], vars[suite]['oname'],
+                     size, vars[suite]['tests'])
+                command += ' --nodes %s --numnodes %d --procs %d' % \
+                    (vars[suite]['nodes'], nodes, ppernode)
+                command += ' --runtime %s --creds %s --ldist %d %s' % \
+                    (vars[suite]['runtime'], vars[suite]['creds'],
+                     ldist, nohead)
+
+                if 'username' in vars[suite]:
+                    command += ' --username %s' % vars[suite]['username']
+                if 'sshkey' in vars[suite]:
+                    command += ' --sshkey %s' % vars[suite]['sshkey']
+                if 'synctime' in vars[suite]:
+                    command += ' --sync %s' % vars[suite]['synctime']
+                if 'pretest' in vars[suite]:
+                    command += ' --pretest %s' % vars[suite]['pretest']
+                if 'options' in vars[suite]:
+                    command += ' %s' % vars[suite]['options']
+                if debug & 192:    # 64/128
+                    command += ' --debug %d' % (debug & 192)
+
+                # these are optional
+                if 'csv' in vars[suite] and vars[suite]['csv'] == '1':
+                    command += ' --csv'
+                if 'utc' in vars[suite] and vars[suite]['utc'] == '1':
+                    command += ' --utc'
+                if 'objutc' in vars[suite] and vars[suite]['objutc'] == '1':
+                    command += ' --objutc'
+
+                if not debug & 256:
+                    command += ' | tee -a %s' % outname
+                if options.dryrun:
+                    print '\n%s\n' % command
+                    sys.exit()
+
+                if debug & 6:
+                    print "Command:", command
+
+                results = ''
+                if not debug & 4:
+                    my_env = os.environ.copy()
+                    try:
+                        # only need to return results in case we want to look
+                        # at it though currently it all goes to 'outname'
+                        results = subprocess.check_output(\
+                            command, shell=True, env=my_env,
+                             stderr=subprocess.STDOUT)
+                    except subprocess.CalledProcessError as err:
+                        print "gpsuite error executing %s" % command
+
+                if debug & 256:
+                    print results,
+
+                # post test processing?
+                if 'posttest' in vars[suite]:
+                    for line in results.split('\n'):
+                        if re.search('^#|error|warning|debug|command|results',
+                                     line, re.IGNORECASE):
+                            continue
+                        if re.match('get|put|del', line):
+                            fields = line.split()
+                            test = fields[0]
+                            ftime = fields[4]
+                            ttime = fields[5]
+                            command = '%s -l%s -f%s -t%s' \
+                                % (vars[suite]['posttest'],
+                                   dirname, ftime, ttime)
+                            if debug & 2:
+                                print "Command:", command
+                            results = subprocess.check_output(\
+                                command, shell=True,
+                                stderr=subprocess.STDOUT)
+                            if not debug & 256:
+                                ofile.write(results)
+                            else:
+                                print results,
+
+                nohead = '--nohead'
+
+                # time to abort?
+                if 'maxhours' in vars[suite] and (time.time() > endsecs):
+                    message = "runtime of %s hours exceeded.  " + \
+                        "exiting..." % vars[suite]['maxhours']
+                    print message
+                    ofile.write(message)
+                    ofile.close()
+                    sys.exit()
+
+    if 'suitedone' in vars[suite]:
+        command = '%s -s%s' % (vars[suite]['suitedone'], suite)
+        command_exec(command)

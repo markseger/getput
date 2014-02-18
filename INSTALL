@@ -1,0 +1,25 @@
+# Install getput tools suite
+
+NAME=python-gptools
+BINDIR=$DESTDIR/usr/bin
+DOCDIR=$DESTDIR/usr/share/doc/$NAME
+SHRDIR=$DESTDIR/usr/share/$NAME
+MANDIR=$DESTDIR/usr/share/man/man1
+CFGDIR=$DESTDIR/etc/gpsuite.d
+
+mkdir -p $BINDIR
+mkdir -p $DOCDIR
+mkdir -p $SHRDIR
+mkdir -p $CFGDIR
+mkdir -p $MANDIR
+
+cp *py            $BINDIR
+cp man1/*         $MANDIR
+cp gpsuite.conf   $CFGDIR
+cp *.txt          $DOCDIR
+cp RELEASE-$NAME  $DOCDIR
+cp UNINSTALL      $SHRDIR
+
+mv $BINDIR/gpsuite.py $BINDIR/gpsuite
+mv $BINDIR/gpmulti.py $BINDIR/gpmulti
+mv $BINDIR/getput.py  $BINDIR/getput

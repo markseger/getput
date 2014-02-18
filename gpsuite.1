@@ -1,0 +1,301 @@
+.TH GPSUITE 1 "APRIL 2013" LOCAL "getput" -*- nroff -*-
+.SH NAME
+gpsuite - swift benchmarking load generation tool, main control script
+
+.SH SYNOPSIS
+
+gpsuite [--suite name] [--conf file] [options]
+
+.SH DESCRIPTION
+
+While getput.py is fine for running ad hoc tests on a single machine, one often
+wishes to run a more comprehensive set of easily repeatable tests, often from
+multiple machines, at the same time and gpsuite allows one to do just that.
+
+Essentially you build suites of tests, including all the parameters necessary
+to run those tests from one or more machines, specifying the details in one or
+more config files.  A suite includes all the getput switches as well as
+additional ones needed to connect to those test machines via passwordless ssh
+as well as allowing the tests to start at the same time. After a single test
+finishes, gpsuite consolidates the output into a single line entry in a log file
+whose directory is also specified in the config file.
+
+.SH CONFIGURATION
+
+When gpsuite is started and no --config specified, it first looks for config files in
+/etc/gpsuite.d/, loading any it finds with an extension of '.conf', but always loading
+the base, gpsuite.conf first if it exists.  Any others are loaded in glob order.  It then looks
+in the current directory loading any it finds there as well whose name is of the format
+'gpsuite-xxx.conf', again in sort order.  If --config is specified it ONLY loads that
+one file.
+
+These config files are  defined as a set of stanzas, each starting with a name in the format
+[suitename], noting the brackets are required.  If an entry is encountered while processing
+a particular suite of the form 'include suitename', all values defined for that suite will be
+inherited for the current suite, overriding anything previously defined.  There is no
+limit to the number of includes, the only requirement being that a suite must be defined before
+it can be included.
+
+There is one special/optional variable one can define in a stanza and its name is 'options'.
+This setting has its value appended onto all the other switches being defined by the stanza and passed
+on to gmulti.  What makes this value special is that in addition to being able to override a
+previous definition, one can also write it as 'options = +switches' and the plus sign says to
+append these values onto the currently inherited value.  In other words if there are a number
+of tests that share some common options and only differ in a couple, the additional switches can
+simply use + to add in that one, simplifying the maintenance of the configuration.
+
+To be sure you know what test parameters have been selected, it is suggested you do a test run
+with the --dryrun switch, which will report all parameter values as well as show the first command
+that will be executed so you can see how they will interpretted and passed to gpmulti.
+
+For details of the available parameters see the beginning of /etc/gpsuite.d/gpsuite.conf.
+It is recommended that you don't edit this file but rather just use it as a reference
+even though it does get read/processed.
+
+.SH AUTHENTICATION
+
+You must have valid credentials to access swift and they must be specified in
+a credentials file as decribed in the getput manpage.  Further, a copy of that
+file must be available by the identical name both locally (since gpsuite needs
+to read it) and remotely because getput reads it.
+.RE
+
+.SH OPTIONS
+
+These are the basic switches you typically use, more being available for runtime
+reconfiguration of tests:
+
+.B --config file
+.RS
+Names a file tCONTAINER NAME FORMATS
+
+By default, the format of a container is hierarchical, and by that I mean:
+
+   	    	name[-utc]-rank-process
+
+The name is that supplied to getput with the -c or --cname switch.
+
+If the --utc switch is included with a PUT operation, the current utc time is 
+appended to the name of the container, insuring a new and therefore empty
+container will be created.  That container will be used for any subsequent 
+operations, even is they are PUTs as well, thereby allowing you to measure
+rewrite operations.
+
+The rank, which by default is zero is typically set by gpsuite when running
+on multiple nodes.  The process is the process number and also starts at zero.
+
+CONTAINER TYPES
+
+When one uses the default container type, which is 'shared', neither the rank
+nor the process numbers are included and so the resultant container is shared by
+all.  Similarly, the 'bynode' type inludes the rank but not process and so all
+processes on the same node share the container.  And finally, the 'byproc' type
+includes the process number as well and so results in unique containers for each
+individual process.
+
+Since most of the time people are interested in seeing the system working the
+hardest, shared containers are almost exclusively used, at least by me.
+
+o read test suites from instead of gpsuite.conf
+.RE
+
+.B --drift secs
+.RS
+In addition to pinging all the test nodes to make sure they're reachable, gpsuit
+will also run a 'date' command and so compare the clock times as well.  If they
+are found to have drifed by more then this (or the default which is currently
+2 seconds), and error will be reported and the test terminated.
+.RE
+
+.B --dryrun
+.RS
+Since one can have multiple (or just one) levels of indirection inside the gpsuite.conf
+file, it is not always immediately obvious what resultant values will be passed to gpmulti,
+especially if you've just made some changes and want to make sure they're being interpretted
+correctly.  This will cause the values associated with the specified suite to be printed
+and then gpsuite will exit.
+.RE
+
+.B --help
+.RS
+Print a help message and exit.
+.RE
+
+.B --list
+.RS
+List the available suites along with their description as listed in the comment line.  Note
+that if one does not include a comment the previously inherited one (if any) will be displayed.
+.RE
+
+.B --logmod string
+.RS
+When gpsuite creates a logfile name and --logname hasn't been specified, it names
+it date-time-suite.log.  If this switch is include it will insert -string right
+after the suite name which can provide more contextual information about the
+particular run.  This can be very helpful when changing configurations and
+repeating the same suite with each as it's real easy to lose track otherwise.
+.RE
+
+.B --repeat number
+.RS
+Repeat the entire suite this number of times.  Can be handy when a suite only
+runs a test or two and you want to repeat a fixed number of times rather than 
+use --maxhours.
+.RE
+
+.B --suite name
+.RS
+Names the suite you wish to run and based on that value the appropriate set of runtime
+parameters will be selected from gpsuite.conf.
+.RE
+
+.B --version
+.RS
+Print version and exit.
+.RE
+
+Sometimes you may wish to override a suite's settings or simply run an abbreviated test in
+which only a couple of parameters change without having to go back an edit the config file.
+These switches allow you to easily do that as they are applied AFTER the specified suite is
+read and loaded.
+
+.B --logname name
+.RS
+Use this name for the results log for cases in which you want multiple runs to
+write to the same one or simply want a different naming structure.
+.RE
+
+.B --maxhours hours
+.RS
+Set the maximum number of hours the speficied tests are permitted to run, noting the value may
+be a fraction of an hour.  Since the limit is checked after the currently execututing set of
+tests completes, such as a put/get/del, that set is allowed to complete and so the testing
+may run a little over depending on the values of runtime and synctime.
+.RE
+
+.B --maxnodes number
+.RS
+Set the maximum number of nodes to run the test against rather than that specified by the 'maxnodes='
+configuration parameter.
+.RE
+
+.B --nodefill number
+.RS
+Set the number of processes to fill each node with rather than that specified by the 'nodefill='
+configuration parameter.
+.RE
+
+.B --options string
+.RS
+If the string (quoted if whitespace present) is prefaced with a +, the remaining contents 
+of that string will be appended to the existing value of 'options' in the conf file, if
+it is defined.  Otherwise the value of 'options' will be set to this string.
+
+When gpsuite is run with the --dryrun switch, both the old and new values of 'options' will be
+reported.  This will also be the case for the results log file.
+.RE
+
+.B --procs number[,number...]
+.RS
+Set the number of processes to run the test with rather than that specified by the 'procs='
+configuration parameter.
+.RE
+
+.B --runtime secs
+.RS
+Change the runtime for each test to this value rather than that specified by the 'runtime='
+configuration parameter.
+.RE
+
+.B --sizes size[,size...]
+.RS
+Set the number of object sizes to use for the testing rather than that specified by the 'osizes='
+configuration parameter.
+.RE
+
+When modifying code and/or simply trying to figure out what something isn't working as expected,
+these 2 switches can aid in figuring out what is going on.
+
+.B -d mask
+.RS
+This switch specified a mask than can be the combination of one or more values
+which are listed in the beginning of gpsuite.  Simply choose those you're interested
+in and add them together.  A useful one to get started with is 3.
+
+TIP - if you want to enable debugging in gpmulti, just include --options "--debug xxx"
+with your command.
+.RE
+
+.SH GETTING STARTED
+
+Before doing anything, be sure to read the getput manpage as it provides a lot more detail.
+Having done that make sure you are able to use a standalone copy of getput and do some simple
+native operations with it.  Only then should you consider doing anything with gpsuite.
+
+The easiest way to get started testing involves setting up the test clients and setting up the
+platform which will drive the tests.
+
+Client Configuration
+
+.br
+- install python-swiftclient
+.br
+- copy getput.py to the home directory
+.br
+- copy the credentials file to the home directory
+.br
+- make sure you can ssh to that client
+
+Test Driver - create a test directory and in it put:
+
+.br
+- gpmulti, gpsuite and gpsuite.conf
+.br
+- the same credentials file used in test clients home directory
+.br
+- copy/create a file containing list of test clients
+.br
+- if needed, a copy the ssk public key to use
+
+Finally, create a new stanza in gpsuite.conf defining your test
+
+Running your first test
+
+First and foremost, do a dry run and make sure the variables you've defined in gpsuite.conf
+are being interpretted correctly and if not, fix them.
+
+Do a simple and short test run to make sure everyting is working as expected, especially the
+ssh command and optional sshkey.  The following command will perform a 5 second test on the
+first node in your testfile.  The debug value of 2 will cause gpsuite to display each test
+as it's being executed as a way to double check what is going on.
+
+gpsuite --suite yoursuitename --procs 1 --osizes 1 --runtime 5 -d2
+
+Consult the log file and if it looks good, you can either drop all the test switches and do
+a full test or to be safe include a short runtime and run the whole suite.  If there are 
+errors in the log they are usually self-explanitory.  If not, you can cut/paste and 
+manually execute the gpmulti command passing IT a -debug 2 switch which will cause it to 
+display the ssh and getput command it's trying to execute which you can also try to run manually.
+
+Good luck and happy benchmarking...
+
+.SH EXAMPLES
+
+Run with all default values
+
+gpsuite
+
+Run the suite named test1
+
+gpsuite --suite test1
+
+Run the test1 suite, but overring the number of procs to use as well as object sizes
+
+gpsuite --suite test1 --procs 1,2 --osizes 1k,1m
+.RE
+
+.SH AUTHOR
+
+This program was written by mark Seger (mjseger@gmail.com)
+.br
+Copyright 2013 Hewlett-Packard Development Company, LP

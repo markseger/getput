@@ -1,0 +1,207 @@
+INTRODUCTION
+
+While I like to believe the gpsuite of tools are relatively straightforward to
+use, given all the switches and combination of options, they can also be a
+little intimidating the first time you try to figure out what to do with them.
+
+Many of those switches are actually there for inter-tool synchronization and
+the user would rarely even need to use them.  Other switches are there to
+provide additional capabilities or output formats beyond many of the typical
+tests.
+
+This document's intent is to get you started with the basic switches and once
+you are more comfortable with using them, you should be able to discover and 
+play with additional ones by reading the man pages.
+
+This document is divided into 2 main sections, the first discusses using getput
+as a standalone utility which is run on a single node and the second discusses
+using gpsuite, which allows you to define suites of tests for easy reuse for
+either single or multiple coordinated tests running on more than one client.
+You should read and understand the use of getput before diving into gpsuite.
+
+GETPUT
+------
+
+The very first thing you'll need to do before trying to run getput is to verify
+your credentials have been correctly defined and the easiest way to do that,
+which is also described in the man page, is to set up what I call a credentials
+file.  I have multiple files for accessing multiple clusters and they all look
+like this:
+
+export ST_AUTH=https://endpoint.com:35357/auth/v1.0/
+export ST_USER=1234567890:mjs
+export ST_KEY=password
+
+such that all you need to is 'source' the file to export the values into your 
+environment.  If you want to use gpsuite, a file of this format is required so
+it is useful to start using one with getput.  To make sure this is set up
+correctly, source the file run the command:
+
+swift stat
+
+and the command should succeed.  If not, you will need to figure out what is
+wrong with your credentials and get them corrected before you can continue.
+Debugging authentication is beyond the scope of this document.
+
+Once you've succeeded with the stat command your success with running getput is
+highly assured and so you can run the following:
+
+getput -cc -oo -n1 -s1k -tp
+
+which is the simplest of commands.  It tells getput to PUT a single 1k object
+named  'o' to a container named 'c'.  That's all there is to it.  You can name
+the container anything you want as you can also do with the objects.  The 
+object sizes can be anything you choose and if you wish to do more then one
+type of test, simply specifiy them as a comma separate list after the -t such
+as -tp,p,g,d which will do a set of PUT tests, then do them again, then do a
+set of GETs and finally DELETE all the objects.  Getput will even delete the
+container for you unless you specify --cont-nodelete.
+
+Getput also has the ability to repeat the entire set of tests using different
+values for the object sizes, so if you set the sizes like this:
+
+-s1k,10k,100k
+
+you will repeat all the tests specified with -t 3 times using the 3 different
+sizes.
+
+So far, all the tests that have been run use a single process thread.  If
+you want to run with multiple processes you can use something like --procs 2
+which will run the test in two parallel threads and like -t you can also repeat
+the tests using a different process count for each.  You can even use multiple
+processes with multiple object sizes, the result of which can be quite a
+number of combinations of tests.  When you do use multiple processes, each 
+object includes the process number to assure uniqueness.  See the man page for
+more details on object naming.
+
+Sometimes you may wish to use a new container for each test and it may be
+difficult or annoying to come up with a new, unique name for each test.  Not to
+worry, getput has a switch for each occasion and so if you specify --utc, it
+will append the current utc time onto each container name, assuring a
+never-before-used container name will be selected.
+
+One last switch and we're done, --runtime.  When you run a set of tests with
+varying object sizes or especially with different process counts you will
+quickly discover that each iteration of a fixed set of PUTs will take a
+different amount of time.  If you specify --runtime 60, the PUT test will run
+for 60 seconds, noting that the GET and DELETE tests are given more time so
+that they can complete.  If you specify both -n and --runtime, the first value
+to be exceeded will cause the test to terminate and getput will move onto the
+next test.
+
+You should note that when using --runtime, with multiple processes, there is a
+high proability that each PUT test will have written a different number of 
+objects and while getput will keep track of these so a subsequent GET or DELETE
+test can find them, knowledge of these differences will be lost between each
+getput run.
+
+GPSUITE
+-------
+
+Benchmarking typically involves running multiple tests while varying one or more
+parameters so you can measure the different behaviors.  More often than not you
+either do this by building a number of wrapper scripts for each test or write a
+more intelligent script that helps automate the varying of those test switches
+and that is exactly the function of gpsuite.
+
+In this case, you build a config file with a number of stanzas in it which I call
+suites, and hence the name gpsuite.  Each suite lists the switches you want to
+use for your different runs and all you really need to do is run a command like:
+
+gpsuite --suite suitename
+
+But it also turns out there is more complexity than running getput on a local
+machine, especially when there are multiple test nodes.  For example, you'll
+at least need a file with the names or addresses of each node.  In some cases
+you may want to use all the nodes in the file but you may also want to run
+tests using just a subset of them and so you need to be able specify how many
+to use.
+
+There may also be a remote username and possibly an ssh key required as well.
+And remember that credentials file?  You'll need to give the remote node its 
+name so it can source it when running getput.  There's also the notion of
+synchronization between the clients so each starts at the same time in the
+future and so one needs to tell getput how long to delay.
+
+One more thing, and this is a little trickier.  When running getput in a
+standalone mode you could simply specify the tests as -tp,g,d and getput
+would wait for each to complete before moving on to the next, but when running
+on multiple nodes you have to wait for each PUT, GET and DELETE operation to
+complete separately and so can only issue them one at a time.  Remember that
+when using multiple processes you can get different numbers of objects/process?
+There is actually a special switch to specifiy the number of objects for each
+independent process that is required to make this all work.
+
+It turns out with all this extra functionality required by gpsuite it was easier
+to write a script that controlled all this and it's called gpmulti, which acts
+as an intermediary between gpsuite and getput.  In other words you run gpsuite
+and it runs gpmulti for you.  
+
+Since you often want to have multiple tests that only vary by one or two test
+parameters, gpsuite allows you to include one stanza's switches in another and
+simply replace those you want to change.  You can 'include' to as many levels
+as you want, but just take case not to introduce any loops as gpsuite does not
+check for that.
+
+If you have a look at /etc/gpsuite.d/gpsuite.conf you'll see an example suite
+which contains most of these settings as well as a description at the top of
+all those that are available to you.  When gpsuite starts, it always reads this
+file in its entirety, loading in all available stanzas.  Furthermore, it also
+loads in glob order any conf files in that same directory as well as your
+current working directory whose names are of the form gpsuite-xxx.conf.  If
+the same named stanza exists in multiple direcories, the most recent named one
+wins.  You can also see a list of all stanza with the command:
+
+gpsuite --list
+
+But before you can run your first gpsuite command, you need to make sure your
+credentials files is set up correctly AND copied to the home directory you will
+be using on each remote node.  You will also have to installed python-swiftclient
+on all the nodes as well as placed a copy of getput in that same home directory.
+And don't forget to make sure getput does work as expected on each node.  Finally
+you also need to make sure passwordless ssh is functioning correctly.
+
+Once you've done all that you can now run something like:
+
+gpsuite --suite suitename
+
+and if it works, you'll see something like this:
+
+gpsuite --suite st1-1node
+Writing test results to /home/segerm/devtests/st1/20131112-144024-st1-1node.log
+
+and as you can see it tells you the name of the file it's writing its results to,
+which makes it really each to do a tail -f on and watch the test proceeding
+
+However, when setting up a new test for the first time I'll often find something
+was misconfigured and the test failed.  Since the commands are being executed
+remotely this situation can be very difficult to debug.  No worries, there's a
+switch for that too, namely -d2 (see the header of gpsuite for all the different
+values available for debugging).  This particular switch tells gpsuite to show
+you the way it's calling gpmulti and its output then looks like this:
+
+segerm@az1-devclient-0000:~/devtests (master) $ gpsuite --suite st1-1node -d2
+Writing test results to /home/segerm/devtests/st1/20131112-144024-st1-1node.log
+Command: /usr/bin/gpmulti -cst1 -ost1 -s1k -tp,g,d --nodes st1-compute --numnodes 1 --procs 1 \
+--runtime 120 --creds st1-creds --ldist 1  --sync 30 --tests p,g,d --utc | tee -a \
+/home/segerm/devtests/s1/20131112-144024-st1-1node.log
+
+so you can inspect the switches to see if they look correct (or simply have run
+gpsuite with the --dry switch).  But more importantly, you can simply cut/paste the
+gpmulti command and execute it manually, making it real each to see any errors it 
+may encounter.  But sometimes it may not show any errors in which case you can run that
+command with -d2 and it will show you the ssh command it's running getput with which
+you can also cut/paste/run.  Using this technique you can usually determine what went
+wrong.
+
+Finally, you may find yourself getting impatient waiting for a long-running test to
+complete when all you want to do is verify your configuration.  For that reason there
+are a few additionaly command line switches to allow you to overring a suite's settings
+and my favorites are:
+
+--procs 1 --size 1k --runtime 10
+
+which assures me of a single, fast iteration.  Sometimes I'll run a couple of
+processes/sizes just to make sure things are iterating correctly.
+
+Hopefully you'll find this sufficient to get you going...
