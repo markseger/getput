@@ -1,3 +1,12 @@
+0.0.8   Feb 26, 2014
+  - new getput/gpmulti switch: exclog
+  - new conf file options for gpsuite
+    --exclogs set to 1 to request getput to generate exception log
+    --postargs specifies arguments to be included with --posttest script
+  - added -p to posttest API as the logfile timestamp prefix to make it
+    possible for script to find logfile when multiple ones in same dir
+  - needed to optionally add tenant_name to opts if only it defined
+
 0.0.7	Feb 18, 2014
   - Added support for using swiftclient's close() method which was not
     available with V1.5

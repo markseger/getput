@@ -435,7 +435,7 @@ def findbin(name):
 
 if __name__ == "__main__":
 
-    version = '0.0.7'
+    version = '0.0.8'
     copyright = 'Copyright 2013 Hewlett-Packard Development Company, L.P.'
 
     # save command line before anyone else touches it
@@ -637,6 +637,8 @@ if __name__ == "__main__":
                     command += ' --utc'
                 if 'objutc' in vars[suite] and vars[suite]['objutc'] == '1':
                     command += ' --objutc'
+                if 'exclog' in vars[suite] and vars[suite]['exclog'] == '1':
+                    command += ' --exclog %s' % timestamp
 
                 if not debug & 256:
                     command += ' | tee -a %s' % outname
@@ -673,9 +675,11 @@ if __name__ == "__main__":
                             test = fields[0]
                             ftime = fields[4]
                             ttime = fields[5]
-                            command = '%s -l%s -f%s -t%s' \
-                                % (vars[suite]['posttest'],
-                                   dirname, ftime, ttime)
+                            command = '%s -l%s -p%s -f%s -t%s' \
+                                % (vars[suite]['posttest'], \
+                                   dirname, timestamp, ftime, ttime)
+                            if 'postargs' in vars[suite]:
+                                command += ' %s' % vars[suite]['postargs']
                             if debug & 2:
                                 print "Command:", command
                             results = subprocess.check_output(\

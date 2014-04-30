@@ -69,13 +69,18 @@ def logexec(text):
         log.write('%s %s\n' % (time.strftime('%H:%M:%S', time.gmtime()), text))
         log.close()
 
+def exclogger(text):
+
+    exc = open(exclog, 'a')
+    exc.write("%s\n" % text)
+    exc.close()
 
 def error(text, exit_flag=True):
     """
     Main error reporting, usually exits
     """
 
-    print "Error -- Host: %s getput: %s" % (socket.gethostname(), text)
+    print "Error -- Host: %s getput: %s" % (hostname, text)
     if exit_flag:
         sys.exit(0)
 
@@ -186,7 +191,7 @@ def main(argv):
 
     global debug, compress, options, procset, sizeset, ldist10
     global username, password, endpoint, tenant_id, tenant_name, errmax
-    global latexc_min, latexc_max
+    global latexc_min, latexc_max, exclog, excopt
 
     ldist10 = 0
     procset = [1]
@@ -239,6 +244,8 @@ def main(argv):
     groupc.add_option('--errmax',   dest='errmax',
                       help="quit after this number of errors, [def=5]",
                       default=5)
+    groupc.add_option('--exclog',   dest='exclog',
+                      help="write latencies to log instead or terminal")
     groupc.add_option('--latexc',   dest='latexc',
                       help="stop when max latency matches exception")
     groupc.add_option('--logops',   dest='logops',
@@ -444,6 +451,16 @@ def main(argv):
         latexc_min = float(latexc_min)
         latexc_max = float(latexc_max)
 
+    if options.exclog:
+        if not options.latexc:
+            error('--exclog required --latexc')
+        if re.search(':', options.exclog):
+            exclog, excopt = options.exclog.split(':')
+            if excopt != 'c':
+                error('only valid --excopt options is c')
+        else:
+            exclog = options.exclog
+            excopt = ''
 
 def cvtFromKMG(str):
     """
@@ -507,9 +524,11 @@ def connect(endpoint, username, password, tenant_id, tenant_name, \
     elif re.search('v3.0', endpoint):
         auth_version = '3.0'
 
+    # these get specified in opts dictionary
     opts = {}
     if tenant_id != '':
         opts['tenant_id'] = tenant_id
+    if tenant_name != '':
         opts['tenant_name'] = tenant_name
 
     if options.nocompress:
@@ -550,7 +569,7 @@ def connect(endpoint, username, password, tenant_id, tenant_name, \
                              os_options=opts, ssl_compression=comp)
     except Exception as err:
         import traceback
-        print "Connect failure: %s", err
+        print "Connect failure: %s" % err
         logexec('connect() exception: %s %s' % (err, traceback.format_exc()))
         return(-1)
 
@@ -562,7 +581,7 @@ def connect(endpoint, username, password, tenant_id, tenant_name, \
         headers = connection.head_account()
     except Exception as err:
         import traceback
-        print "head_account failure: %s", err
+        print "head_account failure: %s" % err
         logexec('head_account() exception: %s %s' % \
                     (err, traceback.format_exc()))
         return(-1)
@@ -778,12 +797,15 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
         # let it continue so all the cleanup stuff find objects to delete
         if latency >= latexc_min and latency <= latexc_max:
             start = time.strftime('%Y%m%d %H:%M:%S', time.gmtime(t1))
-            print "Host: %s -- Warning: %s PUT latency exception: %6.3f " \
-                "secs ObjSize: %4s TransID: %s Obj: %s/%s" % \
-                (socket.gethostname(), start, latency, size, transID,
-                 cname, objname)
-            if options.warnexit:
-                break
+            text = "%s PUT latency exception: %6.3f secs " \
+                "ObjSize: %4s TransID: %s Obj: %s/%s" % \
+                (start, latency, size, transID, cname, objname)
+            if not options.exclog:
+                print "Host: %s -- Warning: %s" % (hostname, text)
+                if options.warnexit:
+                    break
+            else:
+                exclogger(text)
 
     elapsed = time.time() - t0
     logger(3, 'Done!  time: %f ops: %d errs: %d' % \
@@ -886,12 +908,15 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
 
         if latency >= latexc_min and latency <= latexc_max:
             start = time.strftime('%Y%m%d %H:%M:%S', time.gmtime(t1))
-            print "Host: %s -- Warning: %s GET latency exception: %6.3f " \
-                "secs ObjSize: %4s TransID: %s Obj: %s/%s" % \
-                (socket.gethostname(), start, latency, size, transID,
-                 cname, objname)
-            if options.warnexit:
-                break
+            text = "%s GET latency exception: %6.3f secs " \
+                "ObjSize: %4s TransID: %s Obj: %s/%s" % \
+                (start, latency, size, transID, cname, objname)
+            if not options.exclog:
+                print "Host: %s -- Warning: %s" % (hostname, text)
+                if options.warnexit:
+                    break
+            else:
+                exclogger(text)
 
     elapsed = time.time() - t0
     logger(3, 'Done!  time: %f ops: %d errs: %d' % \
@@ -1383,12 +1408,20 @@ global header_printed
 
 if __name__ == "__main__":
 
-    version = '0.0.7'
+    version = '0.0.8'
     copyright = 'Copyright 2013 Hewlett-Packard Development Company, L.P.'
+
+    # Needs to be defined before anything else for error logging
+    hostname = socket.gethostname()
 
     # need to differentiate initial call to main from those that are called
     # when parsing args during multiprocessing
     main(sys.argv[1:])
+
+    # make sure log ALWAYS exists before starting
+    if options.exclog and (excopt == 'c' or not os.path.exists(exclog)):
+        exc = open(exclog, 'w')
+        exc.close()
 
     # we probably could do for a single server but it would have to be rank 0
     if re.search('f', options.objopts) and re.search('[gd]', options.tests):

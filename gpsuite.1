@@ -67,36 +67,7 @@ reconfiguration of tests:
 
 .B --config file
 .RS
-Names a file tCONTAINER NAME FORMATS
-
-By default, the format of a container is hierarchical, and by that I mean:
-
-   	    	name[-utc]-rank-process
-
-The name is that supplied to getput with the -c or --cname switch.
-
-If the --utc switch is included with a PUT operation, the current utc time is 
-appended to the name of the container, insuring a new and therefore empty
-container will be created.  That container will be used for any subsequent 
-operations, even is they are PUTs as well, thereby allowing you to measure
-rewrite operations.
-
-The rank, which by default is zero is typically set by gpsuite when running
-on multiple nodes.  The process is the process number and also starts at zero.
-
-CONTAINER TYPES
-
-When one uses the default container type, which is 'shared', neither the rank
-nor the process numbers are included and so the resultant container is shared by
-all.  Similarly, the 'bynode' type inludes the rank but not process and so all
-processes on the same node share the container.  And finally, the 'byproc' type
-includes the process number as well and so results in unique containers for each
-individual process.
-
-Since most of the time people are interested in seeing the system working the
-hardest, shared containers are almost exclusively used, at least by me.
-
-o read test suites from instead of gpsuite.conf
+Names a file to read test suites from instead of gpsuite.conf
 .RE
 
 .B --drift secs
@@ -225,6 +196,35 @@ in and add them together.  A useful one to get started with is 3.
 TIP - if you want to enable debugging in gpmulti, just include --options "--debug xxx"
 with your command.
 .RE
+
+.SH CONTAINER NAME FORMATS
+
+By default, the format of a container is hierarchical, and by that I mean:
+
+   	    	name[-utc]-rank-process
+
+The name is that supplied to getput with the -c or --cname switch.
+
+If the --utc switch is included with a PUT operation, the current utc time is 
+appended to the name of the container, insuring a new and therefore empty
+container will be created.  That container will be used for any subsequent 
+operations, even is they are PUTs as well, thereby allowing you to measure
+rewrite operations.
+
+The rank, which by default is zero is typically set by gpsuite when running
+on multiple nodes.  The process is the process number and also starts at zero.
+
+.SH CONTAINER TYPES
+
+When one uses the default container type, which is 'shared', neither the rank
+nor the process numbers are included and so the resultant container is shared by
+all.  Similarly, the 'bynode' type inludes the rank but not process and so all
+processes on the same node share the container.  And finally, the 'byproc' type
+includes the process number as well and so results in unique containers for each
+individual process.
+
+Since most of the time people are interested in seeing the system working the
+hardest, shared containers are almost exclusively used, at least by me.
 
 .SH GETTING STARTED
 

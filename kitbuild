@@ -1,5 +1,5 @@
 NAME=python-gptools
-VERSION=0.0.7
+VERSION=0.0.8
 KITNAME=$NAME-$VERSION.src.tar.gz
 DIRNAME=/tmp
 

@@ -379,6 +379,12 @@ the default is 5.  If you have specified multiple tests with -t, or multiple siz
 or processes the next test will be executed.
 .RE
 
+.B --exclog name[:option]
+.RS
+Requires use of --latexc, will record exceptions in the named file.  By default, the
+file will created if it doesn't exist OR if the option 'c' is specified.
+.RE
+
 .B --latexc seconds[.msec]
 .RS
 If any operation reports a latency >= to this value, abort the testing.

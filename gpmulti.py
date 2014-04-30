@@ -109,6 +109,8 @@ def main(argv):
                       default=False)
     group2.add_option('--ctype',     dest='ctype',
                       help="container type: shared|bynode|byproc, def=shared")
+    group2.add_option('--exclog',    dest='exclog',
+                      help="write latencies to log instead of terminal")
     group2.add_option('--latexc',    dest='latexc',
                       help="stop when max latency matches exception")
     group2.add_option('--ldist',    dest='ldist',
@@ -281,7 +283,7 @@ def trim(str):
     return(temp)
 
 
-def build_command(timenow, test, size_index, procs, utc, putcount):
+def build_command(synctime, test, size_index, procs, utc, putcount):
 
     command = ''
     getput_name = './getput'
@@ -305,7 +307,6 @@ def build_command(timenow, test, size_index, procs, utc, putcount):
     osize = cvtFromKMG(sizeset[size_index])
 
     # note, we're managing removal of containers after delete tests
-    synctime = timenow + int(options.sync)
     command = '%s -c%s -o%s' % (getput_name, cname, options.oname)
     command += ' -s%s -t%s --procs %d %s' % (osize, test, procs, utcsw)
     command += ' --cont-nodelete --sync %d --nohead' % synctime
@@ -557,7 +558,7 @@ def delcont(cname):
 
 if __name__ == "__main__":
 
-    version = '0.0.7'
+    version = '0.0.8'
     copyright = 'Copyright 2013 Hewlett-Packard Development Company, L.P.'
 
     main(sys.argv[1:])
@@ -642,8 +643,9 @@ for procs in procset:
 
             # make sure remote command sync times offset from same base time
             # BUT only after we drop caches
+            synctime = int(time.time()) + int(options.sync)
             root_command = \
-                build_command(int(time.time()), test, size_index, procs,
+                build_command(synctime, test, size_index, procs,
                               utc, putcount)
             logexec('Command: %s' % root_command)
 
@@ -664,8 +666,14 @@ for procs in procset:
                 remote_command = "%s %s %s --nobjects %s" % \
                     (ssh_command, remote_nodes[rank], root_command, nobjects)
                 remote_command += " --rank %d" % rank
+
+                if options.exclog:
+                    hostname = remote_nodes[rank].split('.')[0].strip()    # strip domain and spaces (if any)
+                    remote_command += ' --exclog /tmp/%s-%s.exc' % (options.exclog, hostname)
+
                 if debug & 2:
                     print "Command:", remote_command
+
                 proc = Process(target=execute, args=(queue, remote_command))
                 jobs.append(proc)
                 proc.start()
