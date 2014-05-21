@@ -1,3 +1,7 @@
+0.1.0   May 20, 2014
+  - use setup.py to install
+  - removed .py extensions
+
 0.0.8   Feb 26, 2014
   - new getput/gpmulti switch: exclog
   - new conf file options for gpsuite

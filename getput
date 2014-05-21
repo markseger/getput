@@ -1408,7 +1408,7 @@ global header_printed
 
 if __name__ == "__main__":
 
-    version = '0.0.8'
+    version = '0.1.0'
     copyright = 'Copyright 2013 Hewlett-Packard Development Company, L.P.'
 
     # Needs to be defined before anything else for error logging
