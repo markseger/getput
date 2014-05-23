@@ -6,13 +6,13 @@ python-swiftclient
 
 Installation:
 
-<BR>git clone https://github.com/markseger/getput.git
+git clone https://github.com/markseger/getput.git
 <BR>cd getput
 <BR>sudo python setup.py install
 
 Documentation:
 
-<BR>/usr/share/doc/gptools/getting-started.txt
+/usr/share/doc/gptools/getting-started.txt
 <BR>/usr/share/doc/gptools/Introduction.pdf
 
 Notes:
