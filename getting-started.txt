@@ -182,9 +182,9 @@ you the way it's calling gpmulti and its output then looks like this:
 
 segerm@az1-devclient-0000:~/devtests (master) $ gpsuite --suite st1-1node -d2
 Writing test results to /home/segerm/devtests/st1/20131112-144024-st1-1node.log
-Command: /usr/bin/gpmulti -cst1 -ost1 -s1k -tp,g,d --nodes st1-compute --numnodes 1 \
---procs 1 --runtime 120 --creds st1-creds --ldist 1  --sync 30 --tests p,g,d --utc | \
-tee -a /home/segerm/devtests/s1/20131112-144024-st1-1node.log
+Command: /usr/bin/gpmulti -cst1 -ost1 -s1k -tp,g,d --nodes st1-compute --numnodes 1 --procs 1 \
+--runtime 120 --creds st1-creds --ldist 1  --sync 30 --tests p,g,d --utc | tee -a \
+/home/segerm/devtests/s1/20131112-144024-st1-1node.log
 
 so you can inspect the switches to see if they look correct (or simply have run
 gpsuite with the --dry switch).  But more importantly, you can simply cut/paste the

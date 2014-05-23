@@ -541,7 +541,9 @@ def print_results(queue, putcount):
 def delcont(cname):
 
     errlog = '/tmp/swiftdel-%s.err' % cname
-    command = 'swift delete %s 2>>%s' % (cname, errlog)
+    command = '/bin/bash -c ". %s;  swift delete %s" 2>>%s' % (options.creds, cname, errlog)
+    if debug & 2:
+        print "Command:", command
 
     # sometimes this can fail so wait a bit for eventual consistency to kick in
     time.sleep(10)
