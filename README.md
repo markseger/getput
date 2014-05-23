@@ -13,6 +13,7 @@ sudo python setup.py install
 Documentation:
 
 /usr/share/doc/gptools/getting-started.txt
+/usr/share/doc/gptools/Introduction.pdf
 
 Notes:
 
