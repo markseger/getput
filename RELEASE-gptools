@@ -1,3 +1,21 @@
+0.1.2   Oct 14, 2014
+  - added new switches:
+    - retries will override the number of operation retries applied
+      during normal operations, the default value of which is 5
+    - sleeps allows one to sleep between tests, sets of tests and
+      sets of processes
+  - include number of tries in exception reporting as well as with
+    -d32
+  - clean up the drift detection code to make errors more explicit AND
+    to check against clock on the machine running gpsuite
+  - gpmulti should NOT try to run getput in ./
+  - cleanup/clarification of --preauthtoken usage in manpage
+  - when using flat hierarchies with getput, you MUST includle -n
+
+0.1.1	Jun 24, 2014
+  - discovered BOTH tenane_id and _name must exist in dictionary
+    for V2 authentication to work
+
 0.1.0   May 20, 2014
   - use setup.py to install
   - removed .py extensions

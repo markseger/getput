@@ -1,6 +1,6 @@
 #!/usr/bin/python -u
 
-# Copyright 2013 Hewlett-Packard Development Company, L.P.
+# Copyright 2014 Hewlett-Packard Development Company, L.P.
 # Use of this script is subject to HP Terms of Use at
 # http://www8.hp.com/us/en/privacy/terms-of-use.html.
 
@@ -34,6 +34,7 @@
 #  32 - show trandIDs/latencies, only make sense for small values of -n
 #  64 - show connection information
 # 128 - trace execution to log in /tmp
+# 256 - report end of test/set/proc sleeps
 
 # logops masks
 #   1 - log all latencies
@@ -69,11 +70,13 @@ def logexec(text):
         log.write('%s %s\n' % (time.strftime('%H:%M:%S', time.gmtime()), text))
         log.close()
 
+
 def exclogger(text):
 
     exc = open(exclog, 'a')
     exc.write("%s\n" % text)
     exc.close()
+
 
 def error(text, exit_flag=True):
     """
@@ -168,20 +171,20 @@ def parse_creds():
             error('your environment has at least 1 OS_ style variable ' + \
                   'defined but not OS_TENANT_NAME or OS_TENANT_ID')
 
-    username = password = endpoint = tenant_id = tenant_name = ''
+    username = password = authurl = tenant_id = tenant_name = ''
     if stnum > 1:
-        endpoint = stvars['ST_AUTH']
+        authurl = stvars['ST_AUTH']
         username = stvars['ST_USER']
         password = stvars['ST_KEY']
         tenant_id = tenant_name = ''
     elif osnum > 1:
-        endpoint = osvars['OS_AUTH_URL']
+        authurl = osvars['OS_AUTH_URL']
         username = osvars['OS_USERNAME']
         password = osvars['OS_PASSWORD']
         tenant_id = osvars['OS_TENANT_ID']
         tenant_name = osvars['OS_TENANT_NAME']
 
-    return((endpoint, username, password, tenant_id, tenant_name))
+    return((authurl, username, password, tenant_id, tenant_name))
 
 
 def main(argv):
@@ -190,7 +193,7 @@ def main(argv):
     """
 
     global debug, compress, options, procset, sizeset, ldist10
-    global username, password, endpoint, tenant_id, tenant_name, errmax
+    global username, password, authurl, tenant_id, tenant_name, errmax
     global latexc_min, latexc_max, exclog, excopt
 
     ldist10 = 0
@@ -258,7 +261,7 @@ def main(argv):
                       help='object options [acfu]')
     groupc.add_option('--preauthtoken', dest='preauthtoken',
                       default='',
-                      help="use this preauthtoken with --proxies")
+                      help="use this rather then the one returned")
     groupc.add_option('--procs',    dest='procset',
                       help="number of processes to run")
     groupc.add_option('--proxies',   dest='proxies', default='',
@@ -268,6 +271,10 @@ def main(argv):
                       action='store_true')
     groupc.add_option('--repeat',   dest='repeats',
                       help='number of time to repeat --num tests')
+    groupc.add_option('--retries',  dest='retries', default='5',
+                      help='number of time to retry failed test')
+    groupc.add_option('--sleeps',   dest='sleeps',
+                      help='times to sleep at various test points')
     groupc.add_option('--warnexit', dest='warnexit',
                       help='exit on warnings', action='store_true')
     parser.add_option_group(groupc)
@@ -301,7 +308,7 @@ def main(argv):
 
     #    T h e s e    h a v e    d e f a u l t s
 
-    (endpoint, username, password, tenant_id, tenant_name) = parse_creds()
+    (authurl, username, password, tenant_id, tenant_name) = parse_creds()
 
     try:
         debug = int(options.debug)
@@ -319,7 +326,7 @@ def main(argv):
         creds = options.creds
         try:
             f = open(creds, 'r')
-            user = password = endpoint = ''
+            user = password = authurl = ''
             for line in f:
                 if re.match('\#|\s*$', line):
                     continue
@@ -328,8 +335,8 @@ def main(argv):
                 search = re.search('OS_AUTH_URL=(.*)', line) or \
                          re.search('ST_AUTH=(.*)', line)
                 if search:
-                    endpoint = search.group(1)
-                    endpoint = endpoint.strip(";'\"")
+                    authurl = search.group(1)
+                    authurl = authurl.strip(";'\"")
 
                 search = re.search('OS_USERNAME=(.*)', line) or \
                          re.search('ST_USER=(.*)', line)
@@ -358,7 +365,7 @@ def main(argv):
 
     #     R e q u i r e d :   - - t e s t s    &    - - c n a m e
 
-    if username == '' or password == '' or endpoint == '':
+    if username == '' or password == '' or authurl == '':
         error('specify credentials with --creds OR set ST_* variables')
 
     if options.tests:
@@ -462,6 +469,7 @@ def main(argv):
             exclog = options.exclog
             excopt = ''
 
+
 def cvtFromKMG(str):
     """
     converts a string containing K, M or G to its equivilent number
@@ -502,6 +510,7 @@ def cvt2KMG(num):
 native_close = True
 if not hasattr(Connection, 'close'):
     native_close = False
+
     class MyConnection(Connection):
 
         def close(self):
@@ -509,7 +518,7 @@ if not hasattr(Connection, 'close'):
                 self.http_conn[1].close()
 
 
-def connect(endpoint, username, password, tenant_id, tenant_name, \
+def connect(authurl, username, password, tenant_id, tenant_name, \
                 preauthurl=None, preauthtoken=None):
     """
     make a connection to swift
@@ -517,15 +526,17 @@ def connect(endpoint, username, password, tenant_id, tenant_name, \
 
     global compress
 
-    if re.search('v1.0', endpoint):
+    if re.search('v1.0', authurl):
         auth_version = '1.0'
-    elif re.search('v2.0', endpoint):
+    elif re.search('v2.0', authurl):
         auth_version = '2.0'
-    elif re.search('v3.0', endpoint):
+    elif re.search('v3.0', authurl):
         auth_version = '3.0'
 
-    # these get specified in opts dictionary
+    # these get specified in opts dictionary noting BOTH tenant_id
+    # and _name must be defined in dictionary
     opts = {}
+    opts['tenant_id'] = opts['tenant_name'] = None
     if tenant_id != '':
         opts['tenant_id'] = tenant_id
     if tenant_name != '':
@@ -536,11 +547,16 @@ def connect(endpoint, username, password, tenant_id, tenant_name, \
     else:
         comp = True
 
+    retries = int(options.retries)
+
+    if preauthurl != None:
+        authurl = ''
     if debug & 64:
-        print "Connect - User %s Key: %s Options: %s SSL: %s" % \
+        print "Connect - User: %s Key: %s Options: %s SSL: %s" % \
             (username, password, opts, comp)
-        print "Connect - AuthVer: %s AuthURL: %s" % (auth_version, endpoint)
-        print "Connect - PreauthURL: %s  PreauthToken: %s" % \
+        print "Connect - Retries: %d AuthVer: %s AuthURL: %s" % \
+            (retries, auth_version, authurl)
+        print "Connect - PreauthURL: %s PreauthToken: %s" % \
             (preauthurl, preauthtoken)
 
     # get the connection object
@@ -551,16 +567,17 @@ def connect(endpoint, username, password, tenant_id, tenant_name, \
         response = {}
         if native_close:
             connection = \
-                Connection(authurl=endpoint,
+                Connection(authurl=authurl,
                              user=username,
                              key=password,
                              auth_version=auth_version,
+                             retries=retries,
                              preauthurl=preauthurl,
                              preauthtoken=preauthtoken,
                              os_options=opts, ssl_compression=comp)
         else:
             connection = \
-                MyConnection(authurl=endpoint,
+                MyConnection(authurl=authurl,
                              user=username,
                              key=password,
                              auth_version=auth_version,
@@ -785,12 +802,13 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
         min, max, tot = latcalc(latency, min, max, tot, lat_dist)
         latencies.append(latency)
 
+        tries = connection.attempts
         if debug & 32:
-            print "%f  %f  TransID: %s Latency: %9.6f  %s/%s" % \
-                (t1, t2, transID, latency, cname, objname)
+            print "%f  %f  TransID: %s Latency: %9.6f Tries: %d %s/%s" % \
+                (t1, t2, transID, latency, tries, cname, objname)
 
         # note the size if the latecy can vary by object size
-        if logmask & 1 or (logmask & 4 and latency > sizelat[size_index]):
+        if logmask & 1 or (logmask & 4 and latency > sizelat[sizenum]):
             logger(2, "%f  %f  %s  %s/%s" %\
                        (t1, latency, transID, cname, objname), instance)
 
@@ -798,8 +816,8 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
         if latency >= latexc_min and latency <= latexc_max:
             start = time.strftime('%Y%m%d %H:%M:%S', time.gmtime(t1))
             text = "%s PUT latency exception: %6.3f secs " \
-                "ObjSize: %4s TransID: %s Obj: %s/%s" % \
-                (start, latency, size, transID, cname, objname)
+                "ObjSize: %4s TransID: %s Tries: %d Obj: %s/%s" % \
+                (start, latency, size, transID, tries, cname, objname)
             if not options.exclog:
                 print "Host: %s -- Warning: %s" % (hostname, text)
                 if options.warnexit:
@@ -898,19 +916,20 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
         min, max, tot = latcalc(latency, min, max, tot, lat_dist)
         latencies.append(latency)
 
+        tries = connection.attempts
         if debug & 32:
-            print "%f  %f  TransID: %s Latency: %9.6f  %s/%s" % \
-                (t1, t2, transID, latency, cname, objname)
+            print "%f  %f  TransID: %s Latency: %9.6f Tries: %d %s/%s" % \
+                (t1, t2, transID, latency, tries, cname, objname)
 
-        if logmask & 1 or (logmask & 4 and latency > sizelat[size_index]):
+        if logmask & 1 or (logmask & 4 and latency > sizelat[sizenum]):
             logger(2, "%f  %f  %s  %s/%s" % \
                        (t1, latency, transID, cname, objname), instance)
 
         if latency >= latexc_min and latency <= latexc_max:
             start = time.strftime('%Y%m%d %H:%M:%S', time.gmtime(t1))
             text = "%s GET latency exception: %6.3f secs " \
-                "ObjSize: %4s TransID: %s Obj: %s/%s" % \
-                (start, latency, size, transID, cname, objname)
+                "ObjSize: %4s TransID: %s Tries: %d Obj: %s/%s" % \
+                (start, latency, size, transID, tries, cname, objname)
             if not options.exclog:
                 print "Host: %s -- Warning: %s" % (hostname, text)
                 if options.warnexit:
@@ -999,10 +1018,11 @@ def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
         latencies.append(latency)
 
         if debug & 32:
-            print "%f  %f  TransID: %s Latency: %9.6f  %s/%s" % \
-                (t1, t2, transID, latency, cname, objname)
+            tries = connection.attempts
+            print "%f  %f  TransID: %s Latency: %9.6f  Tries: %d %s/%s" % \
+                (t1, t2, transID, latency, tries, cname, objname)
 
-        if logmask & 1 or (logmask & 4 and latency > sizelat[size_index]):
+        if logmask & 1 or (logmask & 4 and latency > sizelat[sizenum]):
             logger(2, "%f  %f  %s  %s/%s" % \
                        (t1, latency, transID, cname, objname), instance)
 
@@ -1117,10 +1137,15 @@ def execute_proc(args):
     if len(proxies):
         proxy_index = (instance + int(options.rank)) % \
             len(proxies)
-        preauthurl = 'https://%s/v1/%s' % \
-            (proxies[proxy_index], project_id)
+        proxy = proxies[proxy_index]
+        preauthurl = re.sub('//.*:', '//%s:' % proxy, preauthurl)
 
-    connection = connect(endpoint, username, password, \
+        if debug & 64:
+            print "Proxy Connect, resetting preauthurl to", preauthurl
+
+    if debug & 64:
+        print "*** Actual Connect using preauthurl/preauthtokens"
+    connection = connect(authurl, username, password, \
                              tenant_id, tenant_name, \
                              preauthurl, preauthtoken)
     if connection == -1:
@@ -1408,8 +1433,8 @@ global header_printed
 
 if __name__ == "__main__":
 
-    version = '0.1.0'
-    copyright = 'Copyright 2013 Hewlett-Packard Development Company, L.P.'
+    version = '0.1.2'
+    copyright = 'Copyright 2014 Hewlett-Packard Development Company, L.P.'
 
     # Needs to be defined before anything else for error logging
     hostname = socket.gethostname()
@@ -1423,16 +1448,35 @@ if __name__ == "__main__":
         exc = open(exclog, 'w')
         exc.close()
 
-    # we probably could do for a single server but it would have to be rank 0
-    if re.search('f', options.objopts) and re.search('[gd]', options.tests):
-        error("--objopts f not supported for sequential gets/dels")
+    # flat hierarchies as special
+    if re.search('f', options.objopts):
+        if not options.nobjects:
+            text = "-n required for flat hierarchies."
+            text += "  -r ok too but there will be holes!"
+            error(text)
+        if re.search('[gd]', options.tests):
+            error("--objopts f not supported for sequential gets/dels")
 
     if re.search('a', options.objopts):
         if re.search('P', options.tests):
             error("append mode makes no sense for random PUTs")
         elif not re.search('f', options.objopts):
-            error("append mode only supported for flat hierarchies" + \
+            error("append mode only supported for flat hierarchies. " + \
                       "consider different onames OR --objopts u")
+
+    sleep_test = sleep_testset = sleep_proc = 0
+    if options.sleeps:
+        options.sleeps += '::'    # makes sure aways at least 3
+        fields = options.sleeps.split(':')
+        try:
+            if fields[0] != '':
+                sleep_test = int(fields[0])
+            if fields[1] != '':
+                sleep_testset = int(fields[1])
+            if fields[2] != '':
+                sleep_proc = int(fields[2])
+        except ValueError:
+            error('non-numeric value in --sleeps')
 
     #     C r e a t e    L o c a l    C o n n e c t i o n
 
@@ -1441,44 +1485,37 @@ if __name__ == "__main__":
     # also use this opportunity to get a single auth token/url pair for
     # everyone to share
     proxies = []
-    if options.proxies == '':
-        if options.preauthtoken != '':
-            error('use of --preauthtoken only makes sense with --proxies')
+    preauthurl = ''
+    if debug & 64:
+        print "*** Initial Connect - get preauthtoken/preauthurl"
+    connection = connect(authurl, username, password, \
+                             tenant_id, tenant_name)
+    if connection == -1:
+        error('Error: ClientException connect error')
+    preauthtoken = connection.token
+    preauthurl = connection.url
+    if debug & 64:
+        print "  Got - Auth: %s  Url: %s" % (preauthtoken, preauthurl)
 
-        connection = connect(endpoint, username, password, \
-                                 tenant_id, tenant_name)
-        if connection == -1:
-            error('Error: ClientException connect error')
-        preauthtoken = connection.token
-        preauthurl = connection.url
+    # only is explicitly overriding
+    if options.preauthtoken:
+        preauthtoken = options.preauthtoken
 
-    # if talking directly to proxies, build a list of them which
-    # we'll later plug into the preauthurl
-    else:
+    # when talking directly to proxies, build a list of the
+    # addresses to talk to for later use
+    if options.proxies != '':
+
+        # find the address we're currently pointing to add to the
+        # no_proxy env we're building just in case proxies are set
+        match = re.search('//(.*):', authurl)
+        authaddr = match.group(1)
+        no_proxy = '127.0.0.1,localhost,%s' % authaddr
         for addr in options.proxies.split(','):
             proxies.append(addr)
-
-        # unless explicitly directed not to use an token, generate an
-        # auth-token using the supplied username/password
-        preauthurl = None
-        if options.preauthtoken == '':
-            connection = connect(endpoint, username, password, \
-                                     tenant_id, tenant_name)
-            if connection == -1:
-                error('Error: ClientException connect error')
-            preauthtoken = connection.token
-        else:
-            preauthtoken = options.preauthtoken
-            preauthurl = "https://%s/v1/%s" % (proxies[0], username)
-            connection = connect(endpoint, username, password, \
-                                     tenant_id, tenant_name, \
-                                     preauthurl, preauthtoken)
-            if connection == -1:
-                error('Error: ClientException connect error')
-
-        # when using any sort of auth token we no longer use username/auth
-        project_id = username.split(':')[0]
-        username = password = ''
+            no_proxy += ',%s' % addr
+        os.environ['no_proxy'] = no_proxy
+        if debug & 1:
+            print "Defining no_proxy:",  os.environ['no_proxy']
 
     if options.repeats:
         repeats = int(options.repeats)
@@ -1517,7 +1554,9 @@ if __name__ == "__main__":
     first_test = 1
     header_printed = 0
     for rep in range(repeats):
-        for procs in procset:
+
+        for procnum in range(len(procset)):
+            procs = procset[procnum]
 
             logexec('Running tests for %d procs' % procs)
 
@@ -1528,8 +1567,8 @@ if __name__ == "__main__":
             if repeats == 1:
                 header_printed = 0
 
-            for size_index in range(len(sizeset)):
-                size = sizeset[size_index]
+            for sizenum in range(len(sizeset)):
+                size = sizeset[sizenum]
                 osize = cvtFromKMG(size)
 
                 # see if we need to build a new test object
@@ -1538,7 +1577,11 @@ if __name__ == "__main__":
                     last_size = osize
 
                 puts_per_proc = []
-                for test in options.tests.split(','):
+
+                tests = options.tests.split(',')
+                for testnum in range(len(tests)):
+                #for test in options.tests.split(','):
+                    test = tests[testnum]
 
                     # what time with execution actually start?
                     if options.synctime:
@@ -1630,8 +1673,9 @@ if __name__ == "__main__":
                                 except ClientException, err:
                                     if err.http_status == 404 and \
                                             not cname in created:
-                                        warn = "'%s' in append mode" % cname
-                                        print "warning: creating '%s'" % warn
+                                        warn = "warning: creating '%s'" % cname
+                                        warn += " in append mode"
+                                        print warn
                                         created[cname] = ''
                                     else:
                                         etype = "head_container error: "
@@ -1723,5 +1767,35 @@ if __name__ == "__main__":
                     # complete before aborting, which is what warnproc means
                     if total_errors > 0 and options.warnexit:
                         sys.exit()
+
+                    # on the very last test, skip sleep, noting if no sleeps
+                    # the sleep times are all zeros
+                    if testnum == len(tests) - 1 and \
+                            sizenum == len(sizeset) - 1 and \
+                            procnum == len(procset) - 1:
+                        continue
+
+                    if sleep_test:
+                        if debug & 256:
+                            print "End-of-test, sleeping", sleep_test
+                        time.sleep(sleep_test)
+
+                # on the last testset, skip sleep
+                if sizenum == len(sizeset) - 1 and procnum == len(procset) - 1:
+                    continue
+
+                if sleep_testset:
+                    if debug & 256:
+                        print "End-of-testset, sleeping:", sleep_testset
+                    time.sleep(sleep_testset)
+
+            # on the last proc, skip sleep
+            if procnum == len(procset) - 1:
+                continue
+
+            if sleep_proc:
+                if debug & 256:
+                    print "End-of-proc, sleeping:", sleep_proc
+                    time.sleep(sleep_proc)
 
     logexec('processing complete')

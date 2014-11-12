@@ -1,6 +1,6 @@
 #!/usr/bin/python -u
 
-# Copyright 2013 Hewlett-Packard Development Company, L.P.
+# Copyright 2014 Hewlett-Packard Development Company, L.P.
 # Use of this script is subject to HP Terms of Use at
 # http://www8.hp.com/us/en/privacy/terms-of-use.html.
 
@@ -286,7 +286,7 @@ def trim(str):
 def build_command(synctime, test, size_index, procs, utc, putcount):
 
     command = ''
-    getput_name = './getput'
+    getput_name = 'getput'
     if options.flavor != '':
         getput_name += "-%s" % options.flavor
 
@@ -560,8 +560,8 @@ def delcont(cname):
 
 if __name__ == "__main__":
 
-    version = '0.1.0'
-    copyright = 'Copyright 2013 Hewlett-Packard Development Company, L.P.'
+    version = '0.1.2'
+    copyright = 'Copyright 2014 Hewlett-Packard Development Company, L.P.'
 
     main(sys.argv[1:])
 

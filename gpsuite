@@ -1,6 +1,6 @@
 #!/usr/bin/python -u
 
-# Copyright 2013 Hewlett-Packard Development Company, L.P.
+# Copyright 2014 Hewlett-Packard Development Company, L.P.
 # Use of this script is subject to HP Terms of Use at
 # http://www8.hp.com/us/en/privacy/terms-of-use.html.
 
@@ -55,7 +55,7 @@ def main(argv):
     group0.add_option('--dryrun',      dest='dryrun',
                       help='show params, command to be executed and exit',
                       action='store_true')
-    group0.add_option('--help', dest='help',
+    group0.add_option('-h', '--help', dest='help',
                       help='show this help message and exit',
                       action='store_true')
     group0.add_option('--list',      dest='list',  action='store_true',
@@ -355,6 +355,7 @@ def config_check():
 
     tfile = open(vars[suite]['nodes'], 'r')
 
+    max = int(vars[suite]['maxnodes'])
     ping_fail = 0
     if not debug & 32:
         num = 0
@@ -366,12 +367,13 @@ def config_check():
         time0 = time.time()
         min_time = 9999999999
         max_time = 0
+        drift_error = False
         for node in tfile:
             if re.match('#|\s*$', node):
                 continue
 
             num += 1
-            if num > int(vars[suite]['maxnodes']):
+            if num > max:
                 break
 
             node = node[:-1]
@@ -394,19 +396,37 @@ def config_check():
             if debug & 16:
                 print command
             utc_time = int(subprocess.check_output(command, shell=True))
+
+            # calculate overall drift
             if utc_time < min_time:
                 min_time = utc_time
             if utc_time > max_time:
                 max_time = utc_time
 
-        # very rough, but see how long the ssh commands took and subtract from
-        # clock drift and if resultant drift greater than --drift, give up!
-        if ((max_time - min_time) - (time.time() - time0)) > drift:
-            error('looks like the node clocks may have drifted more than ' + \
-                      ' %d seconds' % drift)
+            our_drift = abs(utc_time - time.time())
+            if our_drift > drift:
+                print "*** WARNING: clock on %s and ours have drifted by %d seconds" % \
+                    (node, our_drift)
+                drift_error = True
+
+        # estimate the overall clock drift between the min/max BUT attempt to
+        # normalize by subtracting our latency in executing the ssh commands.
+        remote_drift = abs(max_time - min_time - (time.time() - time0))
+
+        if remote_drift > drift:
+            print 'looks like one or more remote clocks may have drifted ' + \
+                '%d seconds with each other' % remote_drift
+            drift_error = True
+
+        if drift_error:
+            error('either syncronize clocks OR override drift time with --drift')
 
     if ping_fail:
         error("ping test failed so you must fix the problem to continue")
+
+    if max > num:
+        error("'maxnodes' set to %d for suite, but only %d clients in node file" %
+              (max, num))
 
 
 def command_exec(command):
@@ -435,8 +455,8 @@ def findbin(name):
 
 if __name__ == "__main__":
 
-    version = '0.1.0'
-    copyright = 'Copyright 2013 Hewlett-Packard Development Company, L.P.'
+    version = '0.1.2'
+    copyright = 'Copyright 2014 Hewlett-Packard Development Company, L.P.'
 
     # save command line before anyone else touches it
     command_line = ''
