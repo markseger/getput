@@ -46,6 +46,7 @@ import os
 import re
 import struct
 import random
+import requests
 import signal
 import socket
 import string
@@ -56,6 +57,7 @@ from random import randint
 from optparse import OptionParser, OptionGroup
 from multiprocessing import Pool
 from urllib import quote
+from urlparse import urlparse
 from swiftclient import Connection
 from swiftclient import ClientException
 from swiftclient import put_object
@@ -249,6 +251,9 @@ def main(argv):
                       default=5)
     groupc.add_option('--exclog',   dest='exclog',
                       help="write latencies to log instead or terminal")
+    groupc.add_option('--insecure', dest='insecure',
+                      action='store_true', default=False,
+                      help="allow access without verifying SSL certs")
     groupc.add_option('--latexc',   dest='latexc',
                       help="stop when max latency matches exception")
     groupc.add_option('--logops',   dest='logops',
@@ -275,6 +280,8 @@ def main(argv):
                       help='number of time to retry failed test')
     groupc.add_option('--sleeps',   dest='sleeps',
                       help='times to sleep at various test points')
+    groupc.add_option('--scheme',   dest='scheme', default='',
+                      help='authurl connection scheme, http|https')
     groupc.add_option('--warnexit', dest='warnexit',
                       help='exit on warnings', action='store_true')
     parser.add_option_group(groupc)
@@ -547,6 +554,7 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
     else:
         comp = True
 
+    cacert = getenv('OS_CACERT')
     retries = int(options.retries)
 
     if preauthurl != None:
@@ -556,6 +564,8 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
             (username, password, opts, comp)
         print "Connect - Retries: %d AuthVer: %s AuthURL: %s" % \
             (retries, auth_version, authurl)
+        print "Connect - Insecure: %s  Cert: %s" % \
+            (options.insecure, cacert)
         print "Connect - PreauthURL: %s PreauthToken: %s" % \
             (preauthurl, preauthtoken)
 
@@ -574,6 +584,8 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
                              retries=retries,
                              preauthurl=preauthurl,
                              preauthtoken=preauthtoken,
+                             insecure=options.insecure,
+                             cacert=cacert,
                              os_options=opts, ssl_compression=comp)
         else:
             connection = \
@@ -583,6 +595,8 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
                              auth_version=auth_version,
                              preauthurl=preauthurl,
                              preauthtoken=preauthtoken,
+                             insecure=options.insecure,
+                             cacert=cacert,
                              os_options=opts, ssl_compression=comp)
     except Exception as err:
         import traceback
@@ -691,6 +705,48 @@ def latcalc(latency, min, max, tot, dist):
     dist[bucket] = dist[bucket] + 1
 
     return(min, max, tot)
+
+
+def reset_url(url, new_address=None):
+    """
+    reset url's scheme and port based on --scheme
+    and optional addresss
+    """
+
+    # parse url's scheme, addr, port and path
+    new_url = url
+    pieces = urlparse(new_url)
+    scheme = pieces[0]
+    address = pieces[1]
+    if re.search(':', address):
+        address, port = address.split(':')
+    else:
+        port = ''
+    path = pieces[2]
+
+    # if an address specified, we reset that one
+    if new_address:
+        address = new_address
+
+    # if user specificed --scheme, we use both the scheme and/or port
+    # depending on which are named
+    if options.scheme != '':
+        pieces = options.scheme.split(':')
+        if pieces[0] != '':
+            scheme = pieces[0]
+        if len(pieces) > 1:
+            port = pieces[1]
+
+    new_url = '%s://%s' % (scheme, address)
+    if port != '':
+        new_url += ':%s' % port
+    new_url += path
+
+    if url != new_url and debug & 64:
+        print "Reset: %s  To: %s" % (url, new_url)
+
+    return(new_url)
+
 
 #########################
 #    Object Operations
@@ -1138,8 +1194,7 @@ def execute_proc(args):
         proxy_index = (instance + int(options.rank)) % \
             len(proxies)
         proxy = proxies[proxy_index]
-        preauthurl = re.sub('//.*:', '//%s:' % proxy, preauthurl)
-
+        preauthurl = reset_url(preauthurl, proxy)
         if debug & 64:
             print "Proxy Connect, resetting preauthurl to", preauthurl
 
@@ -1433,7 +1488,7 @@ global header_printed
 
 if __name__ == "__main__":
 
-    version = '0.1.2'
+    version = '0.1.3'
     copyright = 'Copyright 2014 Hewlett-Packard Development Company, L.P.'
 
     # Needs to be defined before anything else for error logging
@@ -1442,6 +1497,10 @@ if __name__ == "__main__":
     # need to differentiate initial call to main from those that are called
     # when parsing args during multiprocessing
     main(sys.argv[1:])
+
+    # disable requests library warning when using --insecure
+    if options.insecure == True:
+        requests.packages.urllib3.disable_warnings()
 
     # make sure log ALWAYS exists before starting
     if options.exclog and (excopt == 'c' or not os.path.exists(exclog)):
@@ -1494,10 +1553,13 @@ if __name__ == "__main__":
         error('Error: ClientException connect error')
     preauthtoken = connection.token
     preauthurl = connection.url
+
     if debug & 64:
         print "  Got - Auth: %s  Url: %s" % (preauthtoken, preauthurl)
 
-    # only is explicitly overriding
+    preauthurl = reset_url(preauthurl)
+
+    # only if explicitly overriding
     if options.preauthtoken:
         preauthtoken = options.preauthtoken
 

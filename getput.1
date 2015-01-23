@@ -508,6 +508,19 @@ is 5.  Setting this to 0 means you will most likely have to handle failures your
 since they are unavoidable.
 .RE
 
+.B --scheme [http|https][:[address]]
+.RS
+After getput is authenticated, a url is returned which is then used for future
+communications.  During development/testing, it may be desireable to override
+the connection scheme changing it from http to https or the other way around.
+One may also wish to change the port.  Both these are accomplished via this
+switch.  To verify the correct behavior occuring you can use -d64 to report
+connection details.
+
+If you also use --proxies in conjunction with --scheme, those same settings
+will be applied when building the proxy urls as well.
+.RE
+
 .B --sleeps string
 .RS
 There are 3 places one can insert a sleep into the testing process, either at the

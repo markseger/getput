@@ -455,7 +455,7 @@ def findbin(name):
 
 if __name__ == "__main__":
 
-    version = '0.1.2'
+    version = '0.1.3'
     copyright = 'Copyright 2014 Hewlett-Packard Development Company, L.P.'
 
     # save command line before anyone else touches it

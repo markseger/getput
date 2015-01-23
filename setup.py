@@ -3,7 +3,7 @@
 from distutils.core import setup
 
 setup(name='gptools',
-      version='0.1.2',
+      version='0.1.3',
       description='getput tools',
       author='Mark Seger',
       author_email='mark.seger@hp.com',

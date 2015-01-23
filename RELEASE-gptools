@@ -1,3 +1,11 @@
+0.1.3   Jan 23, 2014
+  - added new switch, --scheme which allows you to override
+    the url connection scheme as well as the port. applies to
+    both authurl as well as preauthurl for talking directly
+    to proxies
+  - added new switch, --insecure
+  - honor OA_CACERT if defined
+
 0.1.2   Oct 14, 2014
   - added new switches:
     - retries will override the number of operation retries applied
