@@ -526,10 +526,15 @@ will be applied when building the proxy urls as well.
 There are 3 places one can insert a sleep into the testing process, either at the
 end of a single test such as a PUT, GET or DELETE, the end of a set of tests as
 specified by -t, or at the end of a process as specified with --procs.  These are
-specified with this single swift as there are already too many of them.  The
-format is the 3 different sleep times separated by colons.  So to sleep 3 seconds
-only at the end of a set of tests and nowhere else, use the switch --sleeps :3.
-To only sleep between tests, choose --sleeps 1.
+specified with this single switch as there are already too many of them.  The
+format is the 3 different sleep times separated by colons like this:
+
+.RS
+--sleeps [test-sleeps][:endoftest-sleeps[:endofproc-sleeps]]
+.RE
+
+So to sleep 3 seconds only at the end of a set of tests and nowhere else, use the
+switch --sleeps :3. To only sleep between tests, choose --sleeps 1.
 
 NOTE - if you specify multiple values for sleeps they will all be applied as
 appropriate.  Also note the final sleep(s) at the end of the final test will
