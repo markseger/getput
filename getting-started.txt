@@ -13,35 +13,68 @@ This document's intent is to get you started with the basic switches and once
 you are more comfortable with using them, you should be able to discover and 
 play with additional ones by reading the man pages.
 
-This document is divided into 2 main sections, the first discusses using getput
-as a standalone utility which is run on a single node and the second discusses
-using gpsuite, which allows you to define suites of tests for easy reuse for
-either single or multiple coordinated tests running on more than one client.
-You should read and understand the use of getput before diving into gpsuite.
+PREREQUISITES
+-------------
 
-GETPUT
-------
+The focus of this section is on Ubuntu based installations.  While there is
+no reason why these instructions shouldn't work on other distributions, they
+have not been tested anywhere other than Ubuntu.
+
+The only requirement for using getput is that you have installed
+python-swiftclient and the easiest way to do that is by using pip.  If it is
+not currently installed you will need to install that too.  While it may be
+tempting to use apt-get, it's been found that there are a number of dependencies
+that aren't resolved and as a result you will have to manually install a number
+of additional modules.
+
+To install with pip, simply execute the command:
+
+pip install python-swiftclient
+
+AUTHENTICATION
+-------------
+
+Getput currently supports 2 types of authentication, v1 and v2.  v2 additionally
+requires python-keystoneclient which can be installed with pip the same way as
+python-swiftclient.  The one caveat is I have found environments in which there
+were unmet dependencies which also had to be installed.
 
 The very first thing you'll need to do before trying to run getput is to verify
-your credentials have been correctly defined and the easiest way to do that,
+your credentials have been correctly defined and the easiest way to do this,
 which is also described in the man page, is to set up what I call a credentials
-file.  I have multiple files for accessing multiple clusters and they all look
-like this:
+file.  I have multiple files for accessing multiple clusters and those that
+support v1 authentication look liket this:
 
 export ST_AUTH=https://endpoint.com:35357/auth/v1.0/
 export ST_USER=1234567890:mjs
 export ST_KEY=password
 
-such that all you need to is 'source' the file to export the values into your 
-environment.  If you want to use gpsuite, a file of this format is required so
-it is useful to start using one with getput.  To make sure this is set up
-correctly, source the file run the command:
+You can also use v2 authentication which requires keystoneclient also be installed
+and those credentials look like this, noting you can't have both defined at the same
+time.  Also note that OS_CACERT is optional but if you don't include it you may get
+authentication errors which can only be overcome by including --insecure with the
+getput command.
+
+export OS_AUTH_URL=https://endpoint.com:35357/auth/v2.0/
+export OS_USERNAME=mjs
+export OS_PASSWORD=password
+export OS_TENANT_NAME=tenant
+export OS_CACERT=certfile
+
+Having created this file all you need to do is 'source' it to export the values into
+your environment.  If you want to use gpsuite (described later), a file of this
+format is required so it is useful to start using one with getput.  To make sure
+you have set up your credentials correctly, source the file and run the command:
 
 swift stat
 
-and the command should succeed.  If not, you will need to figure out what is
-wrong with your credentials and get them corrected before you can continue.
-Debugging authentication is beyond the scope of this document.
+and you should be presented with some statistics about your object store.  If not,
+you will need to figure out what is wrong with your credentials and get them
+corrected before you can continue.  Debugging authentication is beyond the scope
+of this document.
+
+RUNNING GETPUT
+--------------
 
 Once you've succeeded with the stat command your success with running getput is
 highly assured and so you can run the following:

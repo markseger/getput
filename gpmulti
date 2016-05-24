@@ -1,6 +1,6 @@
 #!/usr/bin/python -u
 
-# Copyright 2014 Hewlett-Packard Development Company, L.P.
+# Copyright 2014-2016 Hewlett-Packard Development Company, L.P.
 # Use of this script is subject to HP Terms of Use at
 # http://www8.hp.com/us/en/privacy/terms-of-use.html.
 
@@ -84,6 +84,7 @@ def main(argv):
                       action='store_true')
     group0.add_option('-v', '--version',  dest='version',
                       help='print version and exit', action='store_true')
+    group0.add_option('--venv',  dest='venv', help="virtual env base")
     parser.add_option_group(group0)
 
     group1 = OptionGroup(parser, 'these are required for getput')
@@ -91,6 +92,8 @@ def main(argv):
                       help='container name')
     group1.add_option('-o', '--oname',    dest='oname',
                       help='object name prefix')
+    group1.add_option('-p', '--policy',    dest='policy',
+                      help='storage policy')
     group1.add_option('-n', '--nobjects', dest='numobjs',
                       help='max number of objects', default=0)
     group1.add_option('-s', '--size',     dest='sizeset',
@@ -100,17 +103,17 @@ def main(argv):
     parser.add_option_group(group1)
 
     group2 = OptionGroup(parser, 'these are optionsal for getput')
-    group2.add_option('--nocompress', dest='nocompress',
-                      help="disable ssl compression",
-                      action='store_true', default=False)
     group2.add_option('--cont-nodelete', dest='cont_nodelete',
                       help="do not delete container after a delete test",
                       action='store_true',
                       default=False)
     group2.add_option('--ctype',     dest='ctype',
-                      help="container type: shared|bynode|byproc, def=shared")
+                      help="container type: shared|bynode|byproc", default="byproc")
     group2.add_option('--exclog',    dest='exclog',
                       help="write latencies to log instead of terminal")
+    group2.add_option('--insecure',  dest='insecure',
+                      action='store_true', default=False,
+                      help="allow access without verifying SSL certs")
     group2.add_option('--latexc',    dest='latexc',
                       help="stop when max latency matches exception")
     group2.add_option('--ldist',    dest='ldist',
@@ -135,6 +138,8 @@ def main(argv):
                       action='store_true')
     group2.add_option('--runtime',  dest='runtime',
                       help="runtime in secs")
+    group2.add_option('--scheme',  dest='scheme',
+                      help="scheme to use")
     group2.add_option('--utc',      dest='utc', action='store_true',
                       help="append -utc to container name")
     group2.add_option('--warnexit', dest='warnexit',
@@ -311,6 +316,9 @@ def build_command(synctime, test, size_index, procs, utc, putcount):
     command += ' -s%s -t%s --procs %d %s' % (osize, test, procs, utcsw)
     command += ' --cont-nodelete --sync %d --nohead' % synctime
 
+    if options.policy:
+        command += " --policy %s" % options.policy
+
     if test == 'p':
         command += ' --putsperproc'
         runtime = int(options.runtime)
@@ -330,6 +338,9 @@ def build_command(synctime, test, size_index, procs, utc, putcount):
     if options.preauthtoken != '':
         command += " --preauthtoken %s" % options.preauthtoken
 
+    if options.insecure:
+        command += " --insecure"
+
     if options.logops:
         command += " --logops %s" % options.logops
 
@@ -338,9 +349,6 @@ def build_command(synctime, test, size_index, procs, utc, putcount):
 
     if options.ldist:
         command += " --ldist %s" % options.ldist
-
-    if options.nocompress:
-        command += " --nocompress"
 
     if options.objopts:
         command += " --objopts %s" % options.objopts
@@ -353,6 +361,9 @@ def build_command(synctime, test, size_index, procs, utc, putcount):
 
     if options.runtime:
         command += " --runtime %d" % runtime
+
+    if options.scheme:
+        command += " --scheme %s" % options.scheme
 
     if options.warnexit:
         command += " --warnexit"
@@ -414,7 +425,11 @@ def print_header():
         for i in (0, 1, 2, 3, 4, 5, 10, 20, 30, 40, 50):
             f10 = "%.*f" % (ldist, float(i) / ldist10)
             hdr = "%s %5s" % (hdr, f10)
-    hdr += "    %4s %s %s " % ('%CPU', 'Comp', 'TimeStamp')
+    #hdr += "    %4s %s Ret" % ('%CPU', 'TimeStamp')
+    hdr += '    %CPU'
+    if options.utc:
+        hdr += '  TimeStamp'
+    hdr += ' Ret'
 
     # in csv mode, just replace all whitspace with commas
     if options.csv:
@@ -451,9 +466,9 @@ def print_results(queue, putcount):
                 print 'Line:', line
 
             # this will need to evolve, but for now treat any error messages
-            # EXCEPT 'apierror' as serious and don't expect any output
+            # EXCEPT 'API Error' as serious and don't expect any output
             if re.search('error|warning|debug', results, re.IGNORECASE):
-                if re.search('apierror', line):
+                if re.search('API|MD5', line):
                     print line
                     continue
                 elif re.search('warning|debug', line, re.IGNORECASE):
@@ -504,18 +519,22 @@ def print_results(queue, putcount):
                     lat_dist[i] = lat_dist[i] + int(fields[i + 14])
 
             percent = percent + float(fields[ldist_offset + 14])
-            compress = fields[ldist_offset + 15]
 
             # only the first put test returns a utc at the end since the
             # other tests are run w/o --utc.  if not running with --utc
             # we don't even care!
+            utc_shift = 0
             if options.utc:
                 if test == 'put' and putcount == 1:
-                    utcstamp = fields[ldist_offset + 16]
+                    utcstamp = fields[ldist_offset + 15]     # no more compress
+                    utc_shift = 1
                 else:
                     utcstamp = utc
             else:
                 utcstamp = ''
+
+            retries = int(fields[ldist_offset + utc_shift + 15])
+
     try:
         out = "%-5s  %4d  %4d  %5s" % \
             (test, numnodes, numnodes * procs, osize)
@@ -525,7 +544,11 @@ def print_results(queue, putcount):
         if options.ldist:
             for i in range(11):
                 out += " %5d" % lat_dist[i]
-        out += "   %5.2f %4s %s" % (percent / items, compress, utcstamp)
+        #out += "   %5.2f %s %3d" % (percent / items, utcstamp, retries)
+        out += "   %5.2f"  % (percent / items)
+        if options.utc:
+            out += ' %s' % utcstamp
+        out += ' %3d' % retries
 
         if options.csv:
             out = re.sub('\s+', ',', out)
@@ -541,12 +564,13 @@ def print_results(queue, putcount):
 def delcont(cname):
 
     errlog = '/tmp/swiftdel-%s.err' % cname
-    command = '/bin/bash -c ". %s;  swift delete %s" 2>>%s' % (options.creds, cname, errlog)
+    insecure = ' --insecure' if options.insecure else ''
+    command = '/bin/bash -c ". %s;  swift delete %s%s" 2>>%s' % (options.creds, cname, insecure, errlog)
     if debug & 2:
         print "Command:", command
 
-    # sometimes this can fail so wait a bit for eventual consistency to kick in
-    time.sleep(10)
+    # sometimes this can fail so wait a bit after 1st failure for eventual consistency to kick in
+    # so we don't have to wait on every delete
     for i in range(3):
         try:
             logexec('deleting container: %s' % command)
@@ -560,8 +584,8 @@ def delcont(cname):
 
 if __name__ == "__main__":
 
-    version = '0.1.3'
-    copyright = 'Copyright 2014 Hewlett-Packard Development Company, L.P.'
+    version = '0.2.1'
+    copyright = 'Copyright 2016 Hewlett-Packard Development Company, L.P.'
 
     main(sys.argv[1:])
 
@@ -651,6 +675,13 @@ for procs in procset:
                               utc, putcount)
             logexec('Command: %s' % root_command)
 
+	    # we need to activate the venv if specified and since immediately
+	    # followed by getput, we need a leading double quite that will be
+	    # closed later when the full remote command is built
+	    if options.venv:
+		venv = '%s/bin/activate' % options.venv
+	        root_command = '". %s; python /usr/bin/%s' % (venv, root_command)
+
             jobs = []
             for rank in range(len(remote_nodes)):
 
@@ -668,6 +699,10 @@ for procs in procset:
                 remote_command = "%s %s %s --nobjects %s" % \
                     (ssh_command, remote_nodes[rank], root_command, nobjects)
                 remote_command += " --rank %d" % rank
+
+		# the venv command needs that closing quote we mentioned earlier
+		if options.venv:
+		    remote_command += '"'
 
                 if options.exclog:
                     hostname = remote_nodes[rank].split('.')[0].strip()    # strip domain and spaces (if any)
@@ -702,21 +737,26 @@ for procs in procset:
                 print "couldn't report results"
                 print "Test: %s  Procs: %s  Size: %s" % (test, procs, osize)
 
-            # stolen from getput, noting we always use --utc
+            # mostly stolen from getput, noting we always use --utc
             if test == 'd' and not options.cont_nodelete:
-                cname = options.cname
-                if options.utc:
-                    cname = '%s-%s' % (cname, utc)
-                if options.ctype == 'bynode':
-                    cname += "-%s" % options.rank
-                if debug & 1:
-                    print 'deleting container(s): %s' % cname
+                for rank in range(len(remote_nodes)):
+                    cname = options.cname
+                    if options.utc:
+                        cname = '%s-%s' % (cname, utc)
+                    if options.ctype == 'bynode':
+                        cname += "-%s" % rank
 
-                if options.ctype != 'byproc':
-                    delcont(cname)
-                else:
-                    for proc in range(procs):
-                        name = '%s-%s-%d' % (cname, options.rank, proc)
-                        delcont(name)
+                    if options.ctype != 'byproc':
+                        if debug & 1:
+                            print 'deleting container(s): %s' % cname
+                        delcont(cname)
+			if options.ctype == 'shared':
+			    break
+                    else:
+                        for proc in range(procs):
+                            name = '%s-%s-%d' % (cname, rank, proc)
+                            if debug & 1:
+                                print 'deleting container(s): %s' % name
+                            delcont(name)
 
 logexec('exiting cleanly')

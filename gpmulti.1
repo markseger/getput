@@ -4,7 +4,7 @@ gpmulti - run swift benchmarking getput tool on multiple systems in parallel
 
 .SH SYNOPSIS
 
-gpmulti --creds file --nodes filename --numnodes [--sshkey key ] [--sync secs]
+gpmulti --creds file --nodes filename --numnodes [--sshkey key ] [--sync secs] [--venv base]
 options...
 
 .SH DESCRIPTION
@@ -59,6 +59,12 @@ is a UCT time whereas this --sync is seconds from now.
 .RS
 If specified, use this for the username in the ssh command.
 .RE
+
+.B --venv path
+.RS
+If specified getput is to be run in a virtual environment by first sourcing
+path/bin/activate before running getput
+.RE
 .RE
 
 Additional Required Switches
@@ -75,8 +81,8 @@ Optional Switches
 
 There are a lot of these and none are required to run.
 
-.B --nocompress, --cont-nodelete, --ctype, --exclog*, --latexc, --ldist, --logops, --nohead, --objopts,
---preauthtoken, --pretest, --procs, --proxies, --quiet, --runtime, --utc, --warnexit
+.B --cont-nodelete, --ctype, --exclog*, --insecure, --latexc, --ldist, --logops, --nohead, --objopts,
+--policy, --preauthtoken, --pretest, --procs, --proxies, --quiet, --runtime, --utc, --warnexit
 .RS
 See the getput manpage for the descriptions of these switches as well as their default values.
 
@@ -107,4 +113,4 @@ with then run the script named getput-flavor via ssh.
 
 This program was written by mark Seger (mjseger@gmail.com)
 .br
-Copyright 2013,2014 Hewlett-Packard Development Company, LP
+Copyright 2013-2015 Hewlett-Packard Development Company, LP

@@ -1,6 +1,6 @@
 #!/usr/bin/python -u
 
-# Copyright 2014 Hewlett-Packard Development Company, L.P.
+# Copyright 2015 Hewlett-Packard Development Company, L.P.
 # Use of this script is subject to HP Terms of Use at
 # http://www8.hp.com/us/en/privacy/terms-of-use.html.
 
@@ -16,25 +16,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# WEIRDNESS
-# - 1419 PUTs are slower than 1420 bytes puts because of nagel
-# - 7887 byte GETs faster than 7888->~16K byt gets, re: pound/nagel
-# - client side PUTs of 1419 bytes slower than 1420 byte puts, re: nagel
-# - sync > 10 secs after conn & before 1st oper causes a 1-sec latency
-#   overcome by forcing communications every 8 seconds during waiting period
-# - sync > 10 AND --nocomp causes lower level EOF error in ssl code, which also
-#   overcome by same mechanism as above
-
 # debug
-#   1 - print some basic stuff. inclucing test starts info
-#   2 - show cont/obj names on calls
-#   4 - report container header info
-#   8 - show name of container being used
-#  16 - show inputs for starting multiprocessing
-#  32 - show trandIDs/latencies, only make sense for small values of -n
-#  64 - show connection information
-# 128 - trace execution to log in /tmp
-# 256 - report end of test/set/proc sleeps
+#    1 - print some basic stuff. inclucing test starts info
+#    2 - show cont/obj names on calls
+#    4 - report container header info
+#    8 - show name of container being used
+#   16 - show inputs for starting multiprocessing
+#   32 - show trandIDs/latencies, only make sense for small values of -n
+#   64 - show connection information
+#  128 - trace execution to log in /tmp
+#  256 - report end of test/set/proc sleeps
+# 1024 - report object etag
 
 # logops masks
 #   1 - log all latencies
@@ -53,10 +45,11 @@ import string
 import time
 import inspect
 import cStringIO
+import requests
+import md5
 from random import randint
 from optparse import OptionParser, OptionGroup
 from multiprocessing import Pool
-from urllib import quote
 from urlparse import urlparse
 from swiftclient import Connection
 from swiftclient import ClientException
@@ -90,12 +83,58 @@ def error(text, exit_flag=True):
         sys.exit(0)
 
 
+def build_object():
+    """
+    build a fixed length non-compressible object (unless --objopts
+    is 'c') based on size specified by -s
+    """
+
+    global md5_digest
+
+    # build a fixed size object of appropriate size with RANDOM bytes so we can
+    # be sure they all get transfered and not compressed, but if '--objopts c'
+    # use all the same so we WILL.  join() a lot faster than +
+    temp = ''
+    count = 0
+    if not options.objopts or not re.search('c', options.objopts):
+        while (count < (32 * 1024)):
+            num = int(random.random() * 255)
+            temp = ''.join([temp, struct.pack('B', num)])
+            count = count + 1
+    else:
+        temp = ' ' * 32 * 1024
+
+    # replicate it exponentially for speed
+    fixed_object = temp
+    while (len(fixed_object) < osize):
+        fixed_object = ''.join([fixed_object, fixed_object])
+
+    # trim it down if necessary
+    fixed_object = fixed_object[:osize]
+
+    m = md5.new()
+    m.update(fixed_object)
+    md5_digest = m.hexdigest()
+    if debug & 1024:
+        print "Obj MD5:", md5_digest
+
+    return(fixed_object)
+
+
+def md5check(oper, cname, objname, response, md5_digest):
+
+    etag = response['headers']['etag']
+    if etag != md5_digest:
+        txid = response['headers']['x-trans-id']
+        print "MD5 Error - on %s, TransID: %s for %s/%s, %s != %s" % \
+            (oper, txid, cname, objname, md5_digest, etag)
+
 def reset_last(num_procs):
     """
     Sets the ending object numbers for each process to get, put or delete
 
     some explanation needed...  last[] contains the max number of objects to
-    PUT, GET oe DELETE per process.  In the case of multiple sets of tests,
+    PUT, GET or DELETE per process.  In the case of multiple sets of tests,
     these need to be reset to the original value specified with -n and if a
     single value spread across all procs. Since a PUT test also resets last[]
     to contain actual number of objects so GET/DEL will need to know how many
@@ -154,7 +193,7 @@ def parse_creds():
     osnum = 0
     osvars = {}
     for varname in ['OS_AUTH_URL', 'OS_USERNAME', 'OS_PASSWORD', \
-                        'OS_TENANT_ID', 'OS_TENANT_NAME']:
+                        'OS_TENANT_ID', 'OS_TENANT_NAME', 'OS_PROJECT_NAME']:
         osvars[varname] = getenv(varname)
         if osvars[varname] != '':
             osnum += 1
@@ -169,9 +208,9 @@ def parse_creds():
                                        or osvars['OS_PASSWORD'] == '':
             error('your environment has at least 1 OS_ style variable ' + \
                   'defined but not OS_AUTH_URL, OS_USERNAME or OS_PASSWORD')
-        if osvars['OS_TENANT_NAME'] == '' and osvars['OS_TENANT_ID'] == '':
+        if osvars['OS_TENANT_NAME'] == '' and osvars['OS_TENANT_ID'] == '' and osvars['OS_PROJECT_NAME'] == '':
             error('your environment has at least 1 OS_ style variable ' + \
-                  'defined but not OS_TENANT_NAME or OS_TENANT_ID')
+                  'defined but not OS_TENANT_NAME, OS_TENANT_ID or OS_PROJECT_NAME')
 
     username = password = authurl = tenant_id = tenant_name = ''
     if stnum > 1:
@@ -194,7 +233,7 @@ def main(argv):
     read/parse switches
     """
 
-    global debug, compress, options, procset, sizeset, ldist10
+    global debug, options, procset, sizeset, ldist10
     global username, password, authurl, tenant_id, tenant_name, errmax
     global latexc_min, latexc_max, exclog, excopt
 
@@ -212,6 +251,8 @@ def main(argv):
                       help='containter/object numbers as a value OR range')
     group0.add_option('-o', '--obj',      dest='oname',
                       help='object name prefix')
+    group0.add_option('-p', '--policy',   dest='policy',
+                      help='container storage policy', default='')
     group0.add_option('-r', '--runtime',  dest='runtime',
                       help="runtime in secs")
     group0.add_option('-s', '--size',     dest='sizeset',
@@ -244,13 +285,17 @@ def main(argv):
     groupc.add_option('--cont-nodelete', dest='cont_nodelete',
                       help="do not delete container after a delete test",
                       action='store_true', default=False)
-    groupc.add_option('--ctype',    dest='ctype', default='shared',
-                      help="container type: shared|bynode|byproc, def=byproc")
+    groupc.add_option('--ctype',    dest='ctype', default='byproc',
+                      help="container type: shared|bynode|byproc")
     groupc.add_option('--errmax',   dest='errmax',
                       help="quit after this number of errors, [def=5]",
-                      default=5)
+                      default=5) 
     groupc.add_option('--exclog',   dest='exclog',
                       help="write latencies to log instead or terminal")
+    groupc.add_option('--extra',   dest='extra',
+                       help="defined value for X-Trans-Id-Extra")
+    groupc.add_option('--headers',   dest='headers',
+                       help="additional headers")
     groupc.add_option('--insecure', dest='insecure',
                       action='store_true', default=False,
                       help="allow access without verifying SSL certs")
@@ -259,9 +304,6 @@ def main(argv):
     groupc.add_option('--logops',   dest='logops',
                       help="log latencies for all operations",
                       default='0')
-    groupc.add_option('--nocompress', dest='nocompress',
-                      help="disable ssl compression", action='store_true',
-                      default=False)
     groupc.add_option('--objopts',    dest='objopts', default='',
                       help='object options [acfu]')
     groupc.add_option('--preauthtoken', dest='preauthtoken',
@@ -531,37 +573,35 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
     make a connection to swift
     """
 
-    global compress
-
     if re.search('v1.0', authurl):
         auth_version = '1.0'
     elif re.search('v2.0', authurl):
         auth_version = '2.0'
-    elif re.search('v3.0', authurl):
-        auth_version = '3.0'
+    elif re.search('v3', authurl):
+        auth_version = '3'
+
+    # simple 1:1 mapping to parameter value
+    cacert = os.environ.get('OS_CACERT')
+    insecure = options.insecure
+    retries = int(options.retries)
 
     # these get specified in opts dictionary noting BOTH tenant_id
     # and _name must be defined in dictionary
-    opts = {}
-    opts['tenant_id'] = opts['tenant_name'] = None
+    os_options = {}
+    os_options['tenant_id'] = os_options['tenant_name'] = None
     if tenant_id != '':
-        opts['tenant_id'] = tenant_id
+        os_options['tenant_id'] = tenant_id
     if tenant_name != '':
-        opts['tenant_name'] = tenant_name
-
-    if options.nocompress:
-        comp = False
-    else:
-        comp = True
-
-    cacert = getenv('OS_CACERT')
-    retries = int(options.retries)
+        os_options['tenant_name'] = tenant_name
+    os_options['project_name'] = 'admin'
+    os_options['object_storage_url'] = os.environ.get('OS_STORAGE_URL')
+    os_options['endpoint_type'] = os.environ.get('OS_ENDPOINT_TYPE')
 
     if preauthurl != None:
         authurl = ''
     if debug & 64:
-        print "Connect - User: %s Key: %s Options: %s SSL: %s" % \
-            (username, password, opts, comp)
+        print "Connect - User: %s Key: %s Options: %s" % \
+            (username, password, os_options)
         print "Connect - Retries: %d AuthVer: %s AuthURL: %s" % \
             (retries, auth_version, authurl)
         print "Connect - Insecure: %s  Cert: %s" % \
@@ -584,9 +624,9 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
                              retries=retries,
                              preauthurl=preauthurl,
                              preauthtoken=preauthtoken,
-                             insecure=options.insecure,
+                             insecure=insecure,
                              cacert=cacert,
-                             os_options=opts, ssl_compression=comp)
+                             os_options=os_options)
         else:
             connection = \
                 MyConnection(authurl=authurl,
@@ -595,9 +635,9 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
                              auth_version=auth_version,
                              preauthurl=preauthurl,
                              preauthtoken=preauthtoken,
-                             insecure=options.insecure,
+                             insecure=insecure,
                              cacert=cacert,
-                             os_options=opts, ssl_compression=comp)
+                             os_options=os_options)
     except Exception as err:
         import traceback
         print "Connect failure: %s" % err
@@ -607,7 +647,6 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
     # Just created the connection object, so make sure we're really connected
     # Errors are very rare, but if something misconfigured we want to know!
     logexec('connected')
-
     try:
         headers = connection.head_account()
     except Exception as err:
@@ -615,6 +654,14 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
         print "head_account failure: %s" % err
         logexec('head_account() exception: %s %s' % \
                     (err, traceback.format_exc()))
+
+        # I'm not happy with the pattern I'm matching but I've seen
+        # at least these 2 types of messages when proxies were set
+        # and head_account failed.
+        failure = "%s" % err
+        if re.search('Not Found|Unable to establish connection', failure):
+            print "    => are proxies or the lack of them the problem? <="
+
         return(-1)
 
     if debug & 4:
@@ -669,14 +716,20 @@ def logger(optype=None, data=None, inst=None, test_time=None):
         logfiles[inst].flush()
 
 
-def api_error(type, instance, cname, oname, err):
+def api_error(type, instance, cname, oname, err, response=None):
     """
     Report SWIFT api errors
     """
 
     time_now = time.strftime('%H:%M:%S')
-    error_string = '%s %s %s/%s apierror %d on instance: %d' % \
-        (time_now, type, cname, oname, err.http_status, instance)
+    error_string = '%s %s API Error %d' % (time_now, type, err.http_status)
+    try:
+	if response:
+	    error_string += ' TransID: %s' % response['headers']['x-trans-id']
+    except KeyError:
+	none
+    error_string += ' %s/%s' % (cname, oname)
+
     if not options.quiet:
         print error_string
     logger(4, 'ApiError: %s ' % err.http_status, instance)
@@ -796,6 +849,7 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
     min = 9999
     ops = max = tot = errs = 0
     puts = 1
+    retries = 0
     maxputs = last[instance]
 
     # flat hierarchies are based on rank/proc/instance AND if container
@@ -806,6 +860,12 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
     logexec('call logger')
     logger(3, 'cname: %s  oname: %s  puts: %d  now: %d  done: %d' % \
                (cname, oname, maxputs, time.time(), donetime), instance)
+
+    if options.headers:
+        fields = options.headers.split(':')
+        debug_tag = fields[0]
+        debug_mask = fields[1]
+        debug_width = int(fields[2]) if len(fields)>2 else 1 
 
     fp = cStringIO.StringIO(fixed_object)
     while (puts <= maxputs and time.time() < donetime and errs < errmax):
@@ -829,16 +889,31 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
         try:
             response = {}
             logexec("Call PUT")
+            headers = {}
+            if options.headers:
+                headers['X-Debug-Mask'] = '%s%0*s:%s' % (debug_tag, debug_width, object_number, debug_mask)
+            if options.extra:
+                headers['X-Trans-Id-Extra'] = options.extra
             connection.put_object(cname, objname, fp, osize,
-                                  response_dict=response)
+                                  response_dict=response,
+                                  headers=headers)
             logexec("PUT succeeded")
             transID = response['headers']['x-trans-id']
+            md5check('put', cname, objname, response, md5_digest)
 
-        except ClientException, err:
-            api_error('put', instance, cname, objname, err)
-            if err.http_status:
-                errs = errs + 1
-                continue
+        except ClientException as err:
+            # I expect this to be very rare so if token expired just
+            # reconnect and retry, treating like any other errors
+            errs = errs + 1
+            if err.http_status == 401:
+                api_error('token expired, retry put', instance, cname, objname, err)
+                puts -= 1
+                connection = connect(authurl, username, password, \
+                                         tenant_id, tenant_name, \
+                                         preauthurl,preauthtoken)
+            else:
+                api_error('put', instance, cname, objname, err, response)
+            continue
 
         # this has been a lot of pain, but if we do get a traceback this is the
         # best way I could think of to both record it locally in the exec.log
@@ -850,7 +925,7 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
             logger(9, '', instance)
             return(['Unexpected Error - put_object() exception: %s' % \
                         err, instance, 0, 0, 0, 0, 0, 0,
-                        lat_dist, latencies, scpu])
+                        lat_dist, latencies, scpu, 0])
 
         ops = ops + 1
         t2 = time.time()
@@ -859,6 +934,7 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
         latencies.append(latency)
 
         tries = connection.attempts
+        retries += tries - 1
         if debug & 32:
             print "%f  %f  TransID: %s Latency: %9.6f Tries: %d %s/%s" % \
                 (t1, t2, transID, latency, tries, cname, objname)
@@ -887,7 +963,7 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
     logger(9, '', instance)
 
     return(['put', instance, elapsed, ops, min, max, \
-                tot, errs, lat_dist, latencies, scpu])
+                tot, errs, lat_dist, latencies, scpu, retries])
 
 
 def get(connection, instance, donetime, cname, csize, oname, random_flag):
@@ -912,8 +988,10 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
     min = 9999
     ops = max = tot = errs = objsize = 0
     gets = 1
+    retries = 0
     maxgets = last[instance]
 
+    logexec('call logger')
     logger(3, 'cname: %s  oname: %s  gets: %d  now: %d  done: %d' %
            (cname, oname, maxgets, time.time(), donetime), instance)
 
@@ -939,15 +1017,27 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
         gets = gets + 1
         t1 = time.time()
         try:
+            response = {}
             body = []
+            headers = {}
+            if options.extra:
+                headers['X-Trans-Id-Extra'] = options.extra
             headers, body = connection.get_object(cname, objname,
+                                                  headers=headers,
+                                                  response_dict=response,
                                                   resp_chunk_size=65536)
+            transID = response['headers']['x-trans-id']
 
-            transID = headers['x-trans-id']   # not getting from response_dict
-
-        except ClientException, err:
-            api_error('get', instance, cname, objname, err)
+        except ClientException as err:
             errs = errs + 1
+            if err.http_status == 401:
+                api_error('token expired, retry get', instance, cname, objname, err)
+                gets -= 1
+                connection = connect(authurl, username, password, \
+                                         tenant_id, tenant_name, \
+                                         preauthurl,preauthtoken)
+            else:
+                api_error('get', instance, cname, objname, err, response)
             continue
 
         except Exception as err:
@@ -955,12 +1045,15 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
             logexec('get_object() exception: %s %s' %\
                         (err, traceback.format_exc()))
             logger(9, '', instance)
-            return(['Unexpected Error - get_object() exception: %s' \
-                        % err, instance, 0, 0, 0, 0, 0, 0, \
-                        lat_dist, latencies, scpu])
+            return(['Unexpected Error - get_object() exception: %s' % \
+                        err, instance, 0, 0, 0, 0, 0, 0,
+                        lat_dist, latencies, scpu, 0])
 
-        # continue reading until we have whole object
+        # continue reading until we have whole object, noting the assumption
+        # if etag checking is fast enough for swift to do all the time, so can I
+        m = md5.new()
         for chunk in body:
+            m.update(chunk)
             if len(chunk) == 0:
                 break
             else:
@@ -971,8 +1064,10 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
         latency = t2 - t1
         min, max, tot = latcalc(latency, min, max, tot, lat_dist)
         latencies.append(latency)
+        md5check('get', cname, objname, response, m.hexdigest())
 
         tries = connection.attempts
+        retries += tries - 1
         if debug & 32:
             print "%f  %f  TransID: %s Latency: %9.6f Tries: %d %s/%s" % \
                 (t1, t2, transID, latency, tries, cname, objname)
@@ -999,7 +1094,7 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
     logger(9, '', instance)
 
     return(['get', instance, elapsed, ops, min, max, \
-                tot, errs, lat_dist, latencies, scpu])
+                tot, errs, lat_dist, latencies, scpu, retries])
 
 
 def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
@@ -1024,6 +1119,7 @@ def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
     min = 9999
     ops = max = tot = errs = 0
     dels = 1
+    retries = 0
     maxdels = last[instance]
 
     logger(3, 'cname: %s  oname: %s  dels: %d  now: %d  done: %d' %
@@ -1053,10 +1149,18 @@ def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
                                      response_dict=response)
             transID = response['headers']['x-trans-id']
 
-        except ClientException, err:
-            api_error('del', instance, cname, objname, err)
+        except ClientException as err:
             errs = errs + 1
+            if err.http_status == 401:
+                api_error('token expired, retry del', instance, cname, objname, err)
+                dels -= 1
+                connection = connect(authurl, username, password, \
+                                         tenant_id, tenant_name, \
+                                         preauthurl,preauthtoken)
+            else:
+                api_error('del', instance, cname, objname, err, response)
             continue
+
 
         except Exception as err:
             import traceback
@@ -1065,7 +1169,7 @@ def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
             logger(9, '', instance)
             return(['Unexpected Error - delete_object() exception: %s' % \
                         err, instance, 0, 0, 0, 0, 0, 0, \
-                        lat_dist, latencies, scpu])
+                        lat_dist, latencies, scpu, 0])
 
         ops = ops + 1
         t2 = time.time()
@@ -1073,8 +1177,9 @@ def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
         min, max, tot = latcalc(latency, min, max, tot, lat_dist)
         latencies.append(latency)
 
+        tries = connection.attempts
+        retries += tries - 1
         if debug & 32:
-            tries = connection.attempts
             print "%f  %f  TransID: %s Latency: %9.6f  Tries: %d %s/%s" % \
                 (t1, t2, transID, latency, tries, cname, objname)
 
@@ -1088,7 +1193,7 @@ def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
     logger(9, '', instance)
 
     return(['del', instance, elapsed, ops, min, max, \
-                tot, errs, lat_dist, latencies, scpu])
+                tot, errs, lat_dist, latencies, scpu, retries])
 
 
 def delcont(connection, cname):
@@ -1099,7 +1204,7 @@ def delcont(connection, cname):
 
     try:
         connection.delete_container(cname)
-    except ClientException, err:
+    except ClientException as err:
         if err.http_status == 409:
             print "container %s is not empty and so couldn't delete" % cname
         else:
@@ -1133,36 +1238,6 @@ def read_stat():
 
     stats.close()
     return(line.rstrip())
-
-
-def build_object():
-    """
-    build a fixed length non-compressible object (unless --objopts
-    is 'c') based on size specified by -s
-    """
-
-    # build a fixed size object of appropriate size with RANDOM bytes so we can
-    # be sure they all get transfered and not compressed, but if '--objopts c'
-    # use all the same so we WILL.  join() a lot faster than +
-    temp = ''
-    count = 0
-    if not options.objopts or not re.search('c', options.objopts):
-        while (count < (32 * 1024)):
-            num = int(random.random() * 255)
-            temp = ''.join([temp, struct.pack('B', num)])
-            count = count + 1
-    else:
-        temp = ' ' * 32 * 1024
-
-    # replicate it exponentially for speed
-    fixed_object = temp
-    while (len(fixed_object) < osize):
-        fixed_object = ''.join([fixed_object, fixed_object])
-
-    # trim it down if necessary
-    fixed_object = fixed_object[:osize]
-
-    return(fixed_object)
 
 
 def execute_proc(args):
@@ -1270,11 +1345,15 @@ def execute_proc(args):
                          csize, oname, random_flag)
         logexec('PUT %d completed' % instance)
     elif test == 'g' or test == 'G':
+        logexec('begin GET %d' % instance)
         output = get(connection, instance, donetime, cname, \
                          csize, oname, random_flag)
+        logexec('GET %d completed' % instance)
     elif test == 'd' or test == 'D':
+        logexec('begin DEL %d' % instance)
         output = delobj(connection, instance, donetime, cname, \
                          csize, oname, random_flag)
+        logexec('DEL %d completed' % instance)
     else:
         error("Invalid test: %s" % test)
 
@@ -1287,7 +1366,7 @@ def execute_proc(args):
 
 
 def print_line(procs, instance, ops, rate, iops, min, max, tot, errs,
-               cpu_percent, lat_dist, median, etime, psum_flag=False):
+               cpu_percent, lat_dist, median, etime, retries, psum_flag=False):
     """
     print a line of results for one process OR total for all, only printing
     process details when --psum set and print_output tells us to do so
@@ -1333,13 +1412,10 @@ def print_line(procs, instance, ops, rate, iops, min, max, tot, errs,
         for i in range(11):
             line += " %5d" % lat_dist[i]
 
-    if options.nocompress:
-        compress = 'no'
-    else:
-        compress = 'def'
-    line += "  %5.2f  %4s" % (cpu_percent, compress)
+    line += "  %5.2f" % cpu_percent
     if options.utc:
         line += ' %d' % ttime
+    line += ' %3d' % retries
     print line
 
 
@@ -1377,9 +1453,10 @@ def print_output(results, procs):
             for i in (0, 1, 2, 3, 4, 5, 10, 20, 30, 40, 50):
                 f10 = "%.*f" % (int(options.ldist), float(i) / ldist10)
                 header += " %5s" % f10
-        header += '   %CPU  Comp'
+        header += '   %CPU'
         if options.utc:
             header += ' %-10s' % 'Timestamp'
+        header += ' Ret'
         print header
         header_printed = 1
 
@@ -1426,10 +1503,10 @@ def print_output(results, procs):
     latmax = 0
     lat_all = []
     etime = time.time()
-    opst = ratet = iopst = 0
+    opst = ratet = iopst = retries = 0
     for i in range(procs):
         oper, instance, elapsed, ops, min, max, tot, errs, \
-            lat_dist, latencies, scpu = results[i]
+            lat_dist, latencies, scpu, retries = results[i]
 
         # combine all latencies into oen big array
         lat_all += latencies
@@ -1444,7 +1521,7 @@ def print_output(results, procs):
         if options.psum:
             print_line(instance, instance, ops, rate, iops, min, max,
                        tot, errs, cpu_percent, lat_dist,
-                       median_calc(latencies), etime, True)
+                       median_calc(latencies), etime, retries, True)
 
         opst += ops
         ratet += rate
@@ -1470,7 +1547,7 @@ def print_output(results, procs):
         median = 0
 
     print_line(procs, instance + 1, opst, ratet, iopst, latmin, latmax,
-               lattot, errors, cpu_percent, ldist_tot, median, etime)
+               lattot, errors, cpu_percent, ldist_tot, median, etime, retries)
 
 
 def control_c_handler(signal, frame):
@@ -1488,8 +1565,8 @@ global header_printed
 
 if __name__ == "__main__":
 
-    version = '0.1.3'
-    copyright = 'Copyright 2014 Hewlett-Packard Development Company, L.P.'
+    version = '0.2.1'
+    copyright = 'Copyright 2015 Hewlett-Packard Development Company, L.P.'
 
     # Needs to be defined before anything else for error logging
     hostname = socket.gethostname()
@@ -1498,9 +1575,39 @@ if __name__ == "__main__":
     # when parsing args during multiprocessing
     main(sys.argv[1:])
 
+    policy = options.policy
+
+    # we need to know which version of disable.warnings to call
+    urlloc = 0
+    try:
+        import urllib3
+        urlloc += 1
+    except:
+        pass
+    try:
+        from requests.packages import urllib3
+        urlloc += 2
+    except:
+        pass
+
+    # older versions of urlib3, which may be part of requests
+    # will givesub-optimal small obj performance
+    urlver = urllib3.__version__
+    fields = urlver.split('.')
+    if fields[0] == 'dev' or int(fields[0]) == 1 and int(fields[1]) < 8:
+        print "WARNING: your are running version '%s' of urllib3" % urlver
+        print "         which may cause small objects operations to run slower"
+        print "         it is recommended you run pip install --upgrade urllib3"
+
     # disable requests library warning when using --insecure
     if options.insecure == True:
-        requests.packages.urllib3.disable_warnings()
+        try:
+            if urlloc & 1:
+                urllib3.disable_warnings()
+            elif urlloc & 2:
+                requests.packages.urllib3.disable_warnings()
+        except AttributeError:
+            pass
 
     # make sure log ALWAYS exists before starting
     if options.exclog and (excopt == 'c' or not os.path.exists(exclog)):
@@ -1546,6 +1653,16 @@ if __name__ == "__main__":
     proxies = []
     preauthurl = ''
     if debug & 64:
+
+        # a lot of extra work but I want to know when proxies are involved
+        header_printed = False
+        for env in os.environ:
+            if re.search('proxy', env):
+                if not header_printed:
+                    print "*** Proxy environment variables ***"
+                    header_printed = True
+                print "%s=%s" % (env, os.environ.get(env))
+
         print "*** Initial Connect - get preauthtoken/preauthurl"
     connection = connect(authurl, username, password, \
                              tenant_id, tenant_name)
@@ -1672,6 +1789,7 @@ if __name__ == "__main__":
                     csize = last_size = 0
                     create_container = 0
                     created = {}
+                    cpolicy = ''
                     for inst in range(procs):
                         puts_per_proc.append(0)    # preallocate
                         if test == 'p' or not re.search('p', options.tests):
@@ -1692,19 +1810,38 @@ if __name__ == "__main__":
                         elif options.ctype == 'byproc':
                             cname += "-%s-%d" % (options.rank, inst)
 
-                        # make sure container for get/delete tests exist
-                        # before proceeding.  appending on PUT needs to be
-                        # dealt with later.
-                        if re.search('[gGdD]', test):
+                        # if container exists, get its storage policy name
+                        # noting since they all MUST be the same we need only
+                        # look at first instance
+                        if inst == 0:
                             try:
-                                container = connection.head_container(cname)
-                            except ClientException, err:
-                                if err.http_status == 404:
-                                    error("container '%s' doesn't exist" % \
-                                        cname)
-                                else:
-                                    error("Error %s trying to access '%s'" % \
-                                         (err.http_status, cname))
+                                response = {}
+                                headers = connection.head_container(cname)
+                                try:
+                                    cpolicy = headers['x-storage-policy']
+                                except KeyError:    # must be pre-juno swift
+                                    if policy != '':
+                                        text = "this version of swift doesn't "
+                                        text += "support storage policies"
+                                        error(text)
+
+                            except ClientException as err:
+                                if err.http_status != 404:
+                                    error("Error %s trying to access '%s'" %
+                                          (err.http_status, cname))
+
+                            # if a storage policy specified and the container
+                            # exists, they MUST match
+                            if policy != '' and cpolicy != '' and \
+                                    cpolicy.lower() != policy.lower():
+                                error('container storage policy for %s already set to %s'
+                                      % (cname, cpolicy))
+
+                        # make sure container for get/delete tests exist
+                        # before proceeding, which means we found cpolicy
+                        # above.  appending on PUT will be dealt with later.
+                        if re.search('[gGdD]', test) and cpolicy == '':
+                            error("container '%s' doesn't exist" % cname)
 
                         # if not doing random or flat object I/O, oject names
                         # all start with base-rank-inst
@@ -1728,11 +1865,10 @@ if __name__ == "__main__":
                         if re.search('[af]', options.objopts):
                             if inst == 0 or options.ctype == 'byproc':
                                 try:
-                                    count_key = 'x-container-object-count'
-                                    container = \
+                                    headers = \
                                         connection.head_container(cname)
-                                    csize = int(container[count_key])
-                                except ClientException, err:
+                                    csize = int(headers['x-container-object-count'])
+                                except ClientException as err:
                                     if err.http_status == 404 and \
                                             not cname in created:
                                         warn = "warning: creating '%s'" % cname
@@ -1746,6 +1882,7 @@ if __name__ == "__main__":
 
                         # make sure container(s) exits BEFORE tests start,
                         # noting append mode sets csize IF continer exists
+                        # AND if a storage policy, set it
                         if test == 'p' and csize == 0:
                             if inst == 0 or options.ctype == 'byproc':
                                 try:
@@ -1754,9 +1891,20 @@ if __name__ == "__main__":
                                     time.sleep(.01)
                                     logexec('Create container %d' % inst)
                                     create_container = 1
-                                    connection.put_container(cname)
+                                    headers = {}
+                                    if policy != '':
+                                        headers ['X-Storage-Policy'] = policy
+                                    connection.put_container(cname, headers=headers)
                                     logexec('container %d created' % inst)
                                 except Exception as err:
+                                    if err.http_status == 409:
+                                        error("Error: 409 Container: %s.  Could be policy mismatch" % cname)
+
+                                    match = re.search('Bad Request\s+(.*)', '%s' % err)
+                                    if match:
+                                        error('Bad Request: %s' % match.group(1))
+
+                                    # unexpected error handling...
                                     import traceback
                                     logexec('put_container except: %s %s' % \
                                                 (err, traceback.format_exc()))

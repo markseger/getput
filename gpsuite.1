@@ -60,6 +60,18 @@ file must be available by the identical name both locally (since gpsuite needs
 to read it) and remotely because getput reads it.
 .RE
 
+.SH ETAG CHECKING
+
+At the start of set of operations, getput builds a fixed sized object and calculates its md5sum, also
+referred to as an etag by swift.  When the size of the object for a test changes, a new one will be
+created and a new md5 is calculated.  For every PUT operation, the etag calculated by swift is returned
+and compared to the original value by getput, assuring the object was correctly received by swift.
+
+For GET operations, swift returns both the object as well as its md5sum.  For these, getput
+will calculate its own md5 for the retrieved object and compare to the etag that swift reports.
+
+In both cases if there is a mismatch, getput will report an error but continue processing.
+
 .SH OPTIONS
 
 These are the basic switches you typically use, more being available for runtime
@@ -298,4 +310,4 @@ gpsuite --suite test1 --procs 1,2 --osizes 1k,1m
 
 This program was written by mark Seger (mjseger@gmail.com)
 .br
-Copyright 2013,2014 Hewlett-Packard Development Company, LP
+Copyright 2013-2015 Hewlett-Packard Development Company, LP

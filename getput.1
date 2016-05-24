@@ -275,6 +275,14 @@ Select a prefix to be used for object naming.  The objects that are created
 will all have names of the format: prefix-rank-process-number.
 .RE
 
+.B -p, --policy policy
+.RS
+Specify a storage policy, the default being to use the default policy swift is
+configured to use.  This only applies to PUT tests and is applied at the time
+the named container is created.  If the container already exists, its policy
+must match.  For other tests, the container's policy must match.  
+.RE
+
 .B -s, --size size1,size2,etc
 .RS
 Size in bytes of the objects to PUT.  You can also specify K, M and G as a multiplier 
@@ -418,14 +426,6 @@ of each operation, the latency and container/object names.
 One can also change the behavior of logging to include more details about test
 start/stop times and optionally exclude the detailed operational data by using
 --debug.
-.RE
-
-.B --nocompress
-.RS
-By default, all object transfers use SSL-Compression and specifying this switch will
-disable it.  The state of compression will also be identified in the output under 
-the Comp column as yes or no to make it easier to associate results to the state of
-compression.
 .RE
 
 .B --objopts
@@ -656,12 +656,8 @@ getput.py -ccont -oobj -s1k,10k,100k,1m,10m,100m -tp,g,d --runtime 60 --procs 1,
 
 .SH RESTRICTIONS
 
-The havana release of python-swiftclient or newer is required to report
-transaction IDs and to disable compression.  If not present, you will not
-see IDs nor be able to disable compression.
-
 .SH AUTHOR
 
 This program was written by mark Seger (mjseger@gmail.com)
 .br
-Copyright 2013,2014 Hewlett-Packard Development Company, LP
+Copyright 2013-2015 Hewlett-Packard Development Company, LP
