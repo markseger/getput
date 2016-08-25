@@ -289,7 +289,7 @@ def main(argv):
                       help="container type: shared|bynode|byproc")
     groupc.add_option('--errmax',   dest='errmax',
                       help="quit after this number of errors, [def=5]",
-                      default=5) 
+                      default=5)
     groupc.add_option('--exclog',   dest='exclog',
                       help="write latencies to log instead or terminal")
     groupc.add_option('--extra',   dest='extra',
@@ -594,6 +594,11 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
     if tenant_name != '':
         os_options['tenant_name'] = tenant_name
     os_options['project_name'] = 'admin'
+    if os.environ.get('OS_PROJECT_NAME') != None
+        os_options['project_name'] = os.environ.get('OS_PROJECT_NAME')
+    os_options['project_domain_name'] = os.environ.get('OS_PROJECT_DOMAIN_NAME')
+    os_options['user_domain_name'] = os.environ.get('OS_USER_DOMAIN_NAME')
+    os_options['region_name'] = os.environ.get('OS_REGION_NAME')
     os_options['object_storage_url'] = os.environ.get('OS_STORAGE_URL')
     os_options['endpoint_type'] = os.environ.get('OS_ENDPOINT_TYPE')
 
@@ -865,7 +870,7 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
         fields = options.headers.split(':')
         debug_tag = fields[0]
         debug_mask = fields[1]
-        debug_width = int(fields[2]) if len(fields)>2 else 1 
+        debug_width = int(fields[2]) if len(fields)>2 else 1
 
     fp = cStringIO.StringIO(fixed_object)
     while (puts <= maxputs and time.time() < donetime and errs < errmax):
