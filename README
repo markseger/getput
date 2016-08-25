@@ -12,3 +12,15 @@ Documentation:
 
 /usr/share/doc/gptools/getting-started.txt
 /usr/share/doc/gptools/Introduction.pdf
+
+Keystone v3: Export the following variables to your env
+
+```
+OS_REGION_NAME=region
+OS_AUTH_URL=url
+OS_USERNAME=user
+OS_USER_DOMAIN_NAME=domain
+OS_PROJECT_NAME=project
+OS_PROJECT_DOMAIN_NAME=domain
+OS_PASSWORD=pwd
+```
