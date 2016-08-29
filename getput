@@ -596,6 +596,7 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
     os_options['project_name'] = 'admin'
     if os.environ.get('OS_PROJECT_NAME') != None:
         os_options['project_name'] = os.environ.get('OS_PROJECT_NAME')
+    os_options['project_id'] = os.environ.get('OS_PROJECT_ID')
     os_options['project_domain_name'] = os.environ.get('OS_PROJECT_DOMAIN_NAME')
     os_options['user_domain_name'] = os.environ.get('OS_USER_DOMAIN_NAME')
     os_options['region_name'] = os.environ.get('OS_REGION_NAME')
