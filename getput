@@ -208,9 +208,11 @@ def parse_creds():
                                        or osvars['OS_PASSWORD'] == '':
             error('your environment has at least 1 OS_ style variable ' + \
                   'defined but not OS_AUTH_URL, OS_USERNAME or OS_PASSWORD')
-        if osvars['OS_TENANT_NAME'] == '' and osvars['OS_TENANT_ID'] == '' and osvars['OS_PROJECT_NAME'] == '':
+        if osvars['OS_TENANT_NAME'] == '' and osvars['OS_TENANT_ID'] == '' \
+                                          and osvars['OS_PROJECT_NAME'] == ''\
+                                          and osvars['OS_PROJECT_ID'] == '':
             error('your environment has at least 1 OS_ style variable ' + \
-                  'defined but not OS_TENANT_NAME, OS_TENANT_ID or OS_PROJECT_NAME')
+                  'defined but not OS_TENANT_NAME, OS_TENANT_ID or OS_PROJECT_NAME, OS_PROJECT_ID')
 
     username = password = authurl = tenant_id = tenant_name = ''
     if stnum > 1:
