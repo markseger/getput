@@ -177,7 +177,7 @@ def getenv(varname):
     return(value)
 
 
-def parse_creds():
+def parse_creds(creds_file=None):
     """
     parse credentials either from environment OR credentials file
     """
@@ -185,7 +185,7 @@ def parse_creds():
     # remember, --creds overrides environment
     stnum = 0
     stvars = {}
-    for varname in ['ST_AUTH', 'ST_USER', 'ST_KEY']:
+    for varname in ['ST_AUTH', 'ST_USER', 'ST_KEY', 'ST_AUTH_VERSION']:
         stvars[varname] = getenv(varname)
         if stvars[varname] != '':
             stnum += 1
@@ -193,13 +193,37 @@ def parse_creds():
     osnum = 0
     osvars = {}
     for varname in ['OS_AUTH_URL', 'OS_USERNAME', 'OS_PASSWORD', \
-                        'OS_TENANT_ID', 'OS_TENANT_NAME', 'OS_PROJECT_NAME', \
-                        'OS_PROJECT_ID', 'OS_PROJECT_DOMAIN_NAME', \
-                        'OS_USER_DOMAIN_NAME', 'OS_REGION_NAME', \
-                        ]:
+                        'OS_TENANT_ID', 'OS_TENANT_NAME', \
+                        'OS_PROJECT_NAME', 'OS_PROJECT_ID', \
+                        'OS_PROJECT_DOMAIN_NAME', 'OS_PROJECT_DOMAIN_ID' \
+                        'OS_USER_DOMAIN_NAME', 'OS_USER_DOMAIN_ID' \
+                        'OS_REGION_NAME', 'OS_SERVICE_TYPE', 'OS_AUTH_VERSION' \
+                        'OS_ENDPOINT_TYPE', 'OS_IDENTITY_API_VERSION', \
+                        'SWIFTCLIENT_INSECURE', 'OS_CACERT', 'OS_CERT']:
         osvars[varname] = getenv(varname)
         if osvars[varname] != '':
             osnum += 1
+
+    if creds_file:
+        try:
+            f = open(creds, 'r')
+            for line in f:
+                if re.match('\#|\s*$', line):
+                    continue
+                line = line.rstrip('\n')
+
+                search = re.search('(ST|OS)_(.*)=(.*)', line)
+                if search:
+                    value = search.group(3).strip(";'\"")
+                    if search.group(1) eq 'ST':
+                        stvars["ST_" + search.group(2)] = value
+                        stnum += 1
+                    else if search.group(1) eq 'OS':
+                        stvars["OS_" + search.group(2)] = value
+                        osnum += 1
+
+        except IOError, err:
+            error("Couldn't read creds file: " + creds)
 
     if stnum > 0 and  osnum > 0:
         error('you have both ST_ and OS_style varibles defined' + \
@@ -363,8 +387,9 @@ def main(argv):
         sys.exit()
 
     #    T h e s e    h a v e    d e f a u l t s
+    #    G e t    C r e d e n t i a l s    f r o m    C r e d s    F i l e
 
-    (authurl, username, password, osvars) = parse_creds()
+    (authurl, username, password, osvars) = parse_creds(options.creds)
 
     try:
         debug = int(options.debug)
@@ -376,48 +401,6 @@ def main(argv):
     except ValueError:
         error('--errmax must be an integer')
 
-    #    G e t    C r e d e n t i a l s    f r o m    C r e d s    F i l e
-
-    if options.creds:
-        creds = options.creds
-        try:
-            f = open(creds, 'r')
-            user = password = authurl = ''
-            for line in f:
-                if re.match('\#|\s*$', line):
-                    continue
-                line = line.rstrip('\n')
-
-                search = re.search('OS_AUTH_URL=(.*)', line) or \
-                         re.search('ST_AUTH=(.*)', line)
-                if search:
-                    authurl = search.group(1)
-                    authurl = authurl.strip(";'\"")
-
-                search = re.search('OS_USERNAME=(.*)', line) or \
-                         re.search('ST_USER=(.*)', line)
-                if search:
-                    username = search.group(1)
-                    username = username.strip(";'\"")
-
-                search = re.search('OS_PASSWORD=(.*)', line) or \
-                         re.search('ST_KEY=(.*)', line)
-                if search:
-                    password = search.group(1)
-                    password = password.strip(";'\"")
-
-                search = re.search('OS_TENANT_ID=(.*)', line)
-                if search:
-                    tenant_id = search.group(1)
-                    tenant_id = tenant_id.strip(";'\"")
-
-                search = re.search('OS_TENANT_NAME=(.*)', line)
-                if search:
-                    tenant_name = search.group(1)
-                    tenant_name = tenant_name.strip(";'\"")
-
-        except IOError, err:
-            error("Couldn't read creds file: " + creds)
 
     #     R e q u i r e d :   - - t e s t s    &    - - c n a m e
 
