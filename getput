@@ -193,7 +193,10 @@ def parse_creds():
     osnum = 0
     osvars = {}
     for varname in ['OS_AUTH_URL', 'OS_USERNAME', 'OS_PASSWORD', \
-                        'OS_TENANT_ID', 'OS_TENANT_NAME', 'OS_PROJECT_NAME']:
+                        'OS_TENANT_ID', 'OS_TENANT_NAME', 'OS_PROJECT_NAME', \
+                        'OS_PROJECT_ID', 'OS_PROJECT_DOMAIN_NAME', \
+                        'OS_USER_DOMAIN_NAME', 'OS_REGION_NAME', \
+                        ]:
         osvars[varname] = getenv(varname)
         if osvars[varname] != '':
             osnum += 1
@@ -212,22 +215,24 @@ def parse_creds():
                                           and osvars['OS_PROJECT_NAME'] == ''\
                                           and osvars['OS_PROJECT_ID'] == '':
             error('your environment has at least 1 OS_ style variable ' + \
-                  'defined but not OS_TENANT_NAME, OS_TENANT_ID or OS_PROJECT_NAME, OS_PROJECT_ID')
+                  'defined but not OS_TENANT_NAME, OS_TENANT_ID or ' + \
+                  'OS_PROJECT_NAME, OS_PROJECT_ID')
 
-    username = password = authurl = tenant_id = tenant_name = ''
+    username = password = authurl = ''
+
     if stnum > 1:
         authurl = stvars['ST_AUTH']
         username = stvars['ST_USER']
         password = stvars['ST_KEY']
-        tenant_id = tenant_name = ''
     elif osnum > 1:
         authurl = osvars['OS_AUTH_URL']
+        del osvars['OS_AUTH_URL']
         username = osvars['OS_USERNAME']
+        del osvars['OS_USERNAME']
         password = osvars['OS_PASSWORD']
-        tenant_id = osvars['OS_TENANT_ID']
-        tenant_name = osvars['OS_TENANT_NAME']
+        del osvars['OS_PASSWORD']
 
-    return((authurl, username, password, tenant_id, tenant_name))
+    return((authurl, username, password, osvars))
 
 
 def main(argv):
@@ -236,7 +241,7 @@ def main(argv):
     """
 
     global debug, options, procset, sizeset, ldist10
-    global username, password, authurl, tenant_id, tenant_name, errmax
+    global username, password, authurl, osvars, errmax
     global latexc_min, latexc_max, exclog, excopt
 
     ldist10 = 0
@@ -359,7 +364,7 @@ def main(argv):
 
     #    T h e s e    h a v e    d e f a u l t s
 
-    (authurl, username, password, tenant_id, tenant_name) = parse_creds()
+    (authurl, username, password, osvars) = parse_creds()
 
     try:
         debug = int(options.debug)
@@ -569,7 +574,7 @@ if not hasattr(Connection, 'close'):
                 self.http_conn[1].close()
 
 
-def connect(authurl, username, password, tenant_id, tenant_name, \
+def connect(authurl, username, password, osvars, \
                 preauthurl=None, preauthtoken=None):
     """
     make a connection to swift
@@ -590,20 +595,10 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
     # these get specified in opts dictionary noting BOTH tenant_id
     # and _name must be defined in dictionary
     os_options = {}
-    os_options['tenant_id'] = os_options['tenant_name'] = None
-    if tenant_id != '':
-        os_options['tenant_id'] = tenant_id
-    if tenant_name != '':
-        os_options['tenant_name'] = tenant_name
-    os_options['project_name'] = 'admin'
-    if os.environ.get('OS_PROJECT_NAME') != None:
-        os_options['project_name'] = os.environ.get('OS_PROJECT_NAME')
-    os_options['project_id'] = os.environ.get('OS_PROJECT_ID')
-    os_options['project_domain_name'] = os.environ.get('OS_PROJECT_DOMAIN_NAME')
-    os_options['user_domain_name'] = os.environ.get('OS_USER_DOMAIN_NAME')
-    os_options['region_name'] = os.environ.get('OS_REGION_NAME')
-    os_options['object_storage_url'] = os.environ.get('OS_STORAGE_URL')
-    os_options['endpoint_type'] = os.environ.get('OS_ENDPOINT_TYPE')
+    for key, value in osvars.iteritems():
+        key = key.replace("OS_", "")
+        key = key.lower())
+        os_options[key] = value
 
     if preauthurl != None:
         authurl = ''
@@ -916,9 +911,8 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
             if err.http_status == 401:
                 api_error('token expired, retry put', instance, cname, objname, err)
                 puts -= 1
-                connection = connect(authurl, username, password, \
-                                         tenant_id, tenant_name, \
-                                         preauthurl,preauthtoken)
+                connection = connect(authurl, username, password, osvars, \
+                                         preauthurl, preauthtoken)
             else:
                 api_error('put', instance, cname, objname, err, response)
             continue
@@ -1041,9 +1035,8 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
             if err.http_status == 401:
                 api_error('token expired, retry get', instance, cname, objname, err)
                 gets -= 1
-                connection = connect(authurl, username, password, \
-                                         tenant_id, tenant_name, \
-                                         preauthurl,preauthtoken)
+                connection = connect(authurl, username, password, osvars, \
+                                         preauthurl, preauthtoken)
             else:
                 api_error('get', instance, cname, objname, err, response)
             continue
@@ -1162,9 +1155,8 @@ def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
             if err.http_status == 401:
                 api_error('token expired, retry del', instance, cname, objname, err)
                 dels -= 1
-                connection = connect(authurl, username, password, \
-                                         tenant_id, tenant_name, \
-                                         preauthurl,preauthtoken)
+                connection = connect(authurl, username, password, osvars, \
+                                         preauthurl, preauthtoken)
             else:
                 api_error('del', instance, cname, objname, err, response)
             continue
@@ -1283,8 +1275,7 @@ def execute_proc(args):
 
     if debug & 64:
         print "*** Actual Connect using preauthurl/preauthtokens"
-    connection = connect(authurl, username, password, \
-                             tenant_id, tenant_name, \
+    connection = connect(authurl, username, password, osvars, \
                              preauthurl, preauthtoken)
     if connection == -1:
         return(['Error: ClientException connect error'])
@@ -1672,8 +1663,7 @@ if __name__ == "__main__":
                 print "%s=%s" % (env, os.environ.get(env))
 
         print "*** Initial Connect - get preauthtoken/preauthurl"
-    connection = connect(authurl, username, password, \
-                             tenant_id, tenant_name)
+    connection = connect(authurl, username, password, osvars)
     if connection == -1:
         error('Error: ClientException connect error')
     preauthtoken = connection.token
