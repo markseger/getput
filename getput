@@ -219,7 +219,7 @@ def parse_creds(creds_file=None):
                         stvars["ST_" + search.group(2)] = value
                         stnum += 1
                     elif search.group(1) == 'OS':
-                        stvars["OS_" + search.group(2)] = value
+                        osvars["OS_" + search.group(2)] = value
                         osnum += 1
 
         except IOError, err:
