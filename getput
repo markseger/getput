@@ -206,7 +206,7 @@ def parse_creds(creds_file=None):
 
     if creds_file:
         try:
-            f = open(creds, 'r')
+            f = open(creds_file, 'r')
             for line in f:
                 if re.match('\#|\s*$', line):
                     continue
@@ -215,15 +215,15 @@ def parse_creds(creds_file=None):
                 search = re.search('(ST|OS)_(.*)=(.*)', line)
                 if search:
                     value = search.group(3).strip(";'\"")
-                    if search.group(1) eq 'ST':
+                    if search.group(1) == 'ST':
                         stvars["ST_" + search.group(2)] = value
                         stnum += 1
-                    else if search.group(1) eq 'OS':
+                    elif search.group(1) == 'OS':
                         stvars["OS_" + search.group(2)] = value
                         osnum += 1
 
         except IOError, err:
-            error("Couldn't read creds file: " + creds)
+            error("Couldn't read creds file: " + creds_file)
 
     if stnum > 0 and  osnum > 0:
         error('you have both ST_ and OS_style varibles defined' + \
@@ -580,7 +580,7 @@ def connect(authurl, username, password, osvars, \
     os_options = {}
     for key, value in osvars.iteritems():
         key = key.replace("OS_", "")
-        key = key.lower())
+        key = key.lower()
         os_options[key] = value
 
     if preauthurl != None:
