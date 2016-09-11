@@ -566,9 +566,9 @@ def connect(authurl, username, password, osvars, \
     make a connection to swift
     """
 
-    if osvars['OS_AUTH_VERSION']:
+    if 'OS_AUTH_VERSION' in osvars:
         auth_version = osvars['OS_AUTH_VERSION']
-    elif osvars['OS_IDENTITY_API_VERSION']:
+    elif 'OS_IDENTITY_API_VERSION' in osvars:
         auth_version = osvars['OS_IDENTITY_API_VERSION']
     elif re.search('v1.0', authurl):
         auth_version = '1.0'
@@ -579,10 +579,10 @@ def connect(authurl, username, password, osvars, \
 
     # simple 1:1 mapping to parameter value
     cacert = None
-    if osvars['OS_CACERT']:
+    if 'OS_CACERT' in osvars:
         cacert = osvars['OS_CACERT']
 
-    if osvars['SWIFTCLIENT_INSECURE']:
+    if 'SWIFTCLIENT_INSECURE' in osvars:
         insecure = osvars['SWIFTCLIENT_INSECURE']
     else:
         insecure = options.insecure
@@ -607,7 +607,7 @@ def connect(authurl, username, password, osvars, \
         print "Connect - Retries: %d AuthVer: %s AuthURL: %s" % \
             (retries, auth_version, authurl)
         print "Connect - Insecure: %s  Cert: %s" % \
-            (options.insecure, cacert)
+            (insecure, cacert)
         print "Connect - PreauthURL: %s PreauthToken: %s" % \
             (preauthurl, preauthtoken)
 
