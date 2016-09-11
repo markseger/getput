@@ -578,13 +578,15 @@ def connect(authurl, username, password, osvars, \
         auth_version = '3'
 
     # simple 1:1 mapping to parameter value
+    cacert = None
     if osvars['OS_CACERT']:
         cacert = osvars['OS_CACERT']
 
     if osvars['SWIFTCLIENT_INSECURE']:
         insecure = osvars['SWIFTCLIENT_INSECURE']
-    else
+    else:
         insecure = options.insecure
+
     retries = int(options.retries)
 
     # these get specified in opts dictionary noting BOTH tenant_id
