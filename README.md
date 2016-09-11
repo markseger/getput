@@ -23,15 +23,3 @@ of python-requests which is not currently in the apt-get repository as of
 this writing.  Running getput with that version results in slower 1K PUTs
 than 2K PUTs.  I've found installing requests-2.2.1 from the tarball fixes
 the problem.
-
-Keystone v3: Export the following variables to your env
-
-```
-OS_REGION_NAME=region
-OS_AUTH_URL=url
-OS_USERNAME=user
-OS_USER_DOMAIN_NAME=domain
-OS_PROJECT_NAME=project
-OS_PROJECT_DOMAIN_NAME=domain
-OS_PASSWORD=pwd
-```
