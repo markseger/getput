@@ -1,0 +1,191 @@
+#!/usr/bin/python -u
+
+# Copyright 2016 Hewlett-Packard Development Company, L.P.
+# Use of this script is subject to HP Terms of Use at
+# http://www8.hp.com/us/en/privacy/terms-of-use.html.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#    http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import re
+import sys
+from optparse import OptionParser, OptionGroup
+
+def error(text):
+    print text
+    sys.exit()
+
+def main(argv):
+
+    global options
+
+    parser = OptionParser()
+    parser.add_option('-c',   dest='col',      help='column to summarize [cilr]', default='r')
+    parser.add_option('-f',   dest='file',     help='file containing test data', default='')
+    parser.add_option('-v',   dest='vertical', help='vertical output', action='store_true')
+    try:
+        (options, args) = parser.parse_args(argv)
+    except:
+        error('invalid option')
+
+    if options.file == '':
+        error('-f required')
+
+    try:
+        file = open(options.file, 'r')
+    except:
+        error("Couldn't open %s" % options.file)
+
+    data = {}
+    obj_sizes = {}
+    num_threads = {}
+    tests = {}
+    median = offset = 0
+
+    # assumes getput output w/o --ldist
+    gpshift = 1
+
+    for line in file:
+
+        if re.match("#gpsuite", line):
+            gpshift = 0
+            offset = 11
+
+        # ignore blank lines and comments
+        line = line[:-1]
+        if line == '' or re.match("^#", line):
+            continue
+
+        # ignore api errors
+        if re.search('API', line):
+            continue
+
+        fields = line.split()
+        test = fields[0 + gpshift]
+
+        # gotta do test this way because strings could be in gpsuite headers
+        if test == 'put' or test == 'get' or test == 'del':
+            if test not in tests:
+                tests[test] = ''
+            clients = int(fields[1 + gpshift])
+            procs = int(fields[2 + gpshift])
+            osize = fields[3 + gpshift].lower()
+            match = re.match('(\d+)(\S)', osize)
+            if match:
+                osize = '%s%07d' % (match.group(2), int(match.group(1)))
+
+            threads = procs
+            
+            key = '%s-%04d-%s' % (test, threads, osize)
+            if not key in data:
+                data[key]={}
+
+            data[key]['rate'] = fields[6 + gpshift]
+            data[key]['iops'] = fields[8 + gpshift]
+            data[key]['lat'] = fields[10 + gpshift]
+            data[key]['range'] = fields[12 + gpshift]
+            data[key]['cpu'] = fields[13+gpshift+offset]
+
+            # remember all uniqe object sizes and thread counts so we can sort
+            obj_sizes[osize] = ''
+            num_threads['%04d' % threads] = '%s-%s' % (clients, procs)
+
+    numcols = len(obj_sizes)
+    if options.col == 'c':
+        col_name = '%CPU'
+        col_type = 'cpu'
+    elif options.col == 'i':
+        col_name = 'IOPS'
+        col_type = 'iops'
+    elif options.col == 'l':
+        col_name = 'Latency'
+        col_type = 'lat'
+    elif options.col == 'r':
+        col_name = 'MB/sec'
+        col_type = 'rate'
+    elif options.col == 'R':
+        col_name = 'LatRange'
+        col_type = 'range'
+
+    if options.vertical:
+        for test in ('put', 'get', 'del'):
+            if test not in tests:
+                continue
+
+            # headers
+            print "Test: %s  %s" % (test, col_name)
+            print '%4s %3s %3s ' % ('Totl', 'Clt', 'Prc'),
+            for osize in sorted(obj_sizes):
+                size = str(int(osize[1:])) + osize[0]
+                print ' %7s' % size,
+            print
+
+            # print one line
+            for threads in sorted(num_threads):
+                clients, procs = num_threads[threads].split('-')
+                print '%4d %3s %3d ' % (int(procs), clients, int(procs) / int(clients)),
+
+                for osize in sorted(obj_sizes):
+                    key = '%s-%04s-%s' % (test, threads, osize)
+
+                    try:
+                        value = data[key][col_type]
+                    except KeyError:
+                        value = '-'
+                    print ' %7s' % value,
+
+                print
+            print
+
+    else:
+        # headers
+        data_width = 9 * len(obj_sizes)
+        line = '*** %-4s ***' % col_name
+        for test in ('put', 'get', 'del'):
+            if test not in tests:
+                continue
+            line += ' '
+            line += '{type:{width}}'.format(type='    *** %s ***' % test, width=data_width)
+        print line
+
+        line = '%4s %3s %3s ' % ('Totl', 'Clt', 'Prc')
+        for test in ('put', 'get', 'del'):
+            if test not in tests:
+                continue
+            line += ' '
+            for osize in sorted(obj_sizes):
+                size = str(int(osize[1:])) + osize[0]
+                line += ' %8s' % size
+        print line
+
+        # data
+        for threads in sorted(num_threads):
+            clients, procs = num_threads[threads].split('-')
+            line = '%4d %3s %3d ' % (int(procs), clients, int(procs) / int(clients))
+
+            for test in ('put', 'get', 'del'):
+                if test not in tests:
+                    continue
+                line += ' '
+                for osize in sorted(obj_sizes):
+                    key = '%s-%04s-%s' % (test, threads, osize)
+                    try:
+                        value = data[key][col_type]
+                    except KeyError:
+                        value = '-'
+                    line += ' %8s' % value
+            print line
+
+
+if __name__ == "__main__":
+
+    main(sys.argv[1:])

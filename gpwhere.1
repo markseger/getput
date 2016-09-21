@@ -1,0 +1,63 @@
+.TH GPWHERE 1 "MAY 2016" LOCAL "getput" -*- nroff -*-
+.SH NAME
+gpwhere - a tool to help analyze swift transactions
+
+.SH SYNOPSIS
+
+gpwhere [-s|-w] -t txid|File [-l] [-v|-V]
+
+.SH DESCRIPTION
+
+When one wishes to analywe one or more swift transactions, it can be
+quite cumbersom since the typical operation is to do a grep of a
+transaction ID across all the swift proxies and object servers to see
+where it was executed.  If you then wish to see how much time was
+spent on each it is also quite cumbersome to visually parse each log
+record.  Using pdsh (parallel distributed shell) helps, but you still
+need to visually parse each record.
+
+The first thing one needs to tell gpwhere is what the addresses of all
+the servers of interest are.  They can either be specified in a file with,
+-s one address per line which works fine for smaller configurations, but
+for larger ones the better way to go is with pdsh, which must be 
+installed beforehand. In this case you create a one-line file containing
+one or pdsh switches, typically like this and pass to gpwhere with -w.
+
+-w 10.241.17.[13-18]
+
+Next you specify a transactionID to lookup with -t and gpqhere will
+produce a nice summary as a single line, each column being the name
+of a server including the time it spent processing the transaction.
+You can also point to a file instead, which contains the output from
+getput via the --latexc switch and optionally the --exclog switch
+which will send that output to a filee.  In this case you'll get one
+line of output per transaction, making it real easy to compare and
+see if a particular server or disk is running slower or perhaps sport
+some errors which gwhere annotates as well.  See the code for details
+of what these annotations actually mean.
+
+If you incude the -l switch, at the very end of the output
+gpwhere will produce latency histograms for proxy, account, container
+and object servers.
+
+In some cases you don't want output as wide as gpwhere produces, especially
+when doing Erasure Codes in which case you can have 14 different object
+servers reporting results and may need a terminal window several hundred
+characters wide.  -v will generate vertical output, one record per line.
+IF you prefer a slight more compact form of output, perhaps when doing
+3-way replication, -V will produce output for one server type per line
+but multiple servers in the line.
+
+.SH EXAMPLES
+
+# report output using the swift file for transaction in the file xxx
+gpwhere -sswift -txxx
+
+# same thing, but produce vertical output
+gpwhere -sswift -txxx -v
+
+.SH AUTHOR
+
+This program was written by mark Seger (mjseger@gmail.com)
+.br
+Copyright 2013-2016 Hewlett-Packard Development Company, LP
