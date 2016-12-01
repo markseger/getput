@@ -326,7 +326,7 @@ def main(argv):
                       help="container type: shared|bynode|byproc")
     groupc.add_option('--errmax',   dest='errmax',
                       help="quit after this number of errors, [def=5]",
-                      default=5)
+                      default=5) 
     groupc.add_option('--exclog',   dest='exclog',
                       help="write latencies to log instead or terminal")
     groupc.add_option('--extra',   dest='extra',
@@ -903,7 +903,7 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
         fields = options.headers.split(':')
         debug_tag = fields[0]
         debug_mask = fields[1]
-        debug_width = int(fields[2]) if len(fields)>2 else 1
+        debug_width = int(fields[2]) if len(fields)>2 else 1 
 
     fp = cStringIO.StringIO(fixed_object)
     while (puts <= maxputs and time.time() < donetime and errs < errmax):
