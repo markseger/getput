@@ -103,111 +103,37 @@ of objects written by each process and use those values accordingly.
 
 .SH RANDOM OPERATIONS
 
-Random operations, particularly PUTs, can be very useful to measure when you want
-to see the impact on container services.  The reason for this is when doing
-sequential lookups, the firs conatiner read will often bring in neighbor records
-so that the next lookup may not necessarily require any disk I/O to pull in.
-On the other hand random operations may cause more I/O and so random tests can
-be useful to measure the effectiveness of your container/database/disk subsystems.
- 
+From a swift perspective, all object operation themselves are essentially random
+since each object is a file which itself resides on one or more systems.  The
+truly random aspects are really involved in accessing the container database
+during a replicated PUT.  The easiest way to make those operations randon is by
+using random object names.
+
 Object Naming
 
-Sometimes one might wish to measure random operations on a container and getput
-supports that as well.  The methodology used it to first create and populate the
-container(s) to be used.  Then when doing random operations, any process running
-on any node should be able to randomly access any object in the entire
-namespace.  The also means the previously discussed naming scheme won't work
-because a process would need to not only generate a random rank and process
-number for each object, it would need to know the maximum count for the
-resulting name and that's not realistic to do, espcially for containers that
-might container millions of objects from multiple nodes/processes.
+This mechanism has actually changed with verion 0.2.2 and its addition of
+the 'r' value for --objopts.  This tells getput to continue to generate object
+names the way it always has BUT now to pass them through the sha512 python function,
+essentially mapping them into a 128 byte random string!  This means when you now
+do get operations, one is essenatially reading names in random order!  It is
+also possible to reduce the name size if you want to keep them smaller, but keep
+in mind since that results in simply using part of the hash string you could get
+duplicates and never know it so don't make them too small.
 
-Therefore the scheme chosen is to have entirely different object naming,
-controlled by --objopt f, which use a 'flat' namespace in which the 
-object simply has a count appended to it in ascending order AND that count is a
-known quantity.  So if you create a container with 1 million objects in it you
-know that value to be 1 million and objects would be named obj-1 -> obj-1000000.
+It may also be desirable to append to a container already containign a number of
+randomly names objects and that too is no problem, with the addition of the new
+switch --objseed.  Just like seeds are using with random number generator to
+change the algoritm between runs, this is similar in the sense that the seed
+is appended to the object name because converting it to a sha512 string.  This
+means if you change the seed between runs, you'll essentially generate new
+object names.  Further you can still access them by just using the same seed they
+were created with.
 
-The last piece of the puzzle is the container type, but from a naming
-perspective all object names remain flat.  So in the case of 1 million objects
-describe above, if 10 nodes create containers of type 'bynode', the objects
-in each container will be named obj-1 -> obj-100000 and if there were 50
-processes on each node creating containers 'byproc', the object names would look
-like obj-1 -> obj-2000.
-
-A word of caution - you can create that namespace using by including -r as well
-as -n.  In this case you're objective may not be to do any random reads but simply
-to see how many objects can be written over a fixed amount of time OR to simply
-build a very large container for future measurements.  If you do this you are
-likely to have holes in the namespace for this simple reason.  If 4 processes are
-to write 10 objects each, the first writes 1->10, the second 11->20, etc.  If the
-test terminates because it hit the runtime limit, each process may not have
-completed its assigned number.  Again, if your intent is to not do any GETs this
-is perfectly fine.
-
-Object Creation
-
-When getput uses multiple processes to PUT flatly named objects, each first
-looks at their container type and if 'byproc', they simply write all the
-requested objects starting with 1.  For 'bynode' containers only need to know
-their own process number to determine which piece of the namespace they need to
-create.
-
-For 'shared' containers each process additionally needs to know their node's
-rank to select a slice of the object namespace to write.  Clearly this requires
-ALL nodes writing their objects to be given the same number of objects to write
-and the same number of processes running on each, a task easily handled by 
-gpsuite.
-
-Just remember that unless every process on every node successully completes
-their job, there will be holes in the container(s) and random operations could
-fail.  Also don't every terminate the creation run with --runtime but rather PUT
-an explicit number of objects by using -n or --nobjects or again, you will have
-holes in the namespace.
-
-And finally, since  it is so critical the container is fully populated it never
-hurts to do something like 'swift list -l container' to make sure it was
-successfully populated and that it contains the expected numbers of objects.
-
-Appending To Flat Hierarchy
-
-There are at least 2 different scenarios for appending to a flat hierarchy, the
-first of which is you may want to see the relationship between container size
-and object creation rate.  For example you may want to create 1M objects, then
-append 1M objects and append 1M again and examine the PUT rates.
-
-The second case is if you're having problems creating really large containers
-it may be easiest to create/append to it in pieces.  However, if even one of the
-intermediate steps fail, you will not be able to use it for random operations
-unless you choose a smaller value for -n to insure you never try to access
-beyond the last known good size.  Objects written after that point will simply
-be orphaned as they'll never be accessed.
-
-In both cases, you simply do a normal sequential PUT, but this time specify
-both 'f' and 'a' in --objopts.  The 'a' tells getput to start put operations
-with object numbers 1 greater than the container size, another reason for making
-sure all expected objects are loaded.
-
-If you get into trouble...
-
-Since random I/O can ultimately touch all objects in a container, it's vital 
-that the objects were created correctly and consistently.  Have I said to verify
-the container size enough times?
-
-It's also vital that the parameters used to drive the random selection is
-consistent with the namespace being accessed.  For example if you create
-1M objects by having 500 processes each create 2000 objects, it's perfectly
-acceptable to then access them by 100 processes each using a count of 10000.  If
-you use a count of 2000 for those 100 processes that will work as well, but they
-will only access the first 200000 objects.  Further, if those 100 processes try
-to access 10001 obects, they could exceed the name space and result in failures.
-
-Since getput uses the container size for appends as well as random gets/dels, if
-objects are ever written to a flat container without specifying --objopt f, you
-would end up with mixed type objects and so when random operations initialize
-the random range to use, it would be larger than the number of flatly-named
-objects and you could get 'object not found' errors.  This is very rare and
-unlikely, but yet another reason to be sure you know what in the container.
+One final thing to keep in mind is that if you want to create a lot of objects
+in the same using multiple processes, be sure to specify --ctype shared or
+else you'll end up with one container per process.  It you want to append to
+an existing container, also remember to NOT use the --utc switch because that
+would cause a new container name to be generated each time getput is run.
 
 .SH AUTHENTICATION
 
@@ -315,6 +241,13 @@ Print version and exit
 .RE
 
 Output Format
+
+.B --echo
+.RS
+Print the getput command along with all its switches to stdout.   This can be
+usful when you wish to archive the output and want to remember what switches
+were used.
+.RE
 
 .B --ldist nummber
 .RS
@@ -446,11 +379,22 @@ highly compressible.
 .RS
 Objects will be named as a flat namespace using an single incrementing count.
 .RE
+.B r[xxx]
+.RS
+Use 128 byte random object names by generating a sha512 digest based on the
+objects ordinal numbering.  You can optionally specify an object name length.
+.RE
 .B u
 .RS
 The base name of an object will have the UTC time appended, making it possible
 to do sequential appends to an existing container.
 .RE
+.RE
+
+.B --objseed num
+.RS
+Specify a seed to be appened to an object name before generating a random name,
+the default is the string 0.
 .RE
 
 .B --preauthtoken token

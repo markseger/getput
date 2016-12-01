@@ -1,0 +1,32 @@
+.TH GPSUM 1 "MAY 2016" LOCAL "getput" -*- nroff -*-
+.SH NAME
+gpsum - a tool to summarize getput output
+
+.SH SYNOPSIS
+
+gpsum -f filename -c [cilr]
+
+.SH DESCRIPTION
+
+The output from getput and/or gpsuite can be quite long and difficult to summarize, particularly
+if you wish to graph it or paste it into a report.
+
+If you have saved the output from one or more runs of getput or gpsuite, you can point gpsum to
+that file with -f and it will automatically summarize the data into one or more columns, by
+object size as well as test type, such as put, get or delete.  Each row will correspond to the
+number of processes.  In the case of gpsuite it will further break down the output by the number
+of clients.
+
+By default, the rate is summarized.  However, using the column switch you can select the client
+cpu load, iops or even latencies be displayed.
+
+.SH EXAMPLES
+
+# displays results as iops
+gpsum -f smalltests.txt -ci
+
+.SH AUTHOR
+
+This program was written by mark Seger (mjseger@gmail.com)
+.br
+Copyright 2013-2016 Hewlett-Packard Development Company, LP
