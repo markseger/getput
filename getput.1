@@ -98,7 +98,7 @@ This means if you then try to read back the same number of objects you're get 40
 or 'object not found' errors.  However, if you run the tests as part of the same
 test set, such as doing --tests p,g,d, getput will remember how many objects the
 put test wrote and only use that number for the get and delete tests.
-Furthermore, if the test were writting using --procs, it will remember the number
+Furthermore, if the test were written using --procs, it will remember the number
 of objects written by each process and use those values accordingly.
 
 .SH RANDOM OPERATIONS
@@ -134,6 +134,25 @@ in the same using multiple processes, be sure to specify --ctype shared or
 else you'll end up with one container per process.  It you want to append to
 an existing container, also remember to NOT use the --utc switch because that
 would cause a new container name to be generated each time getput is run.
+
+.SH GET BY RANGE
+
+This feature has been added as of V0.2.3 and only applies to GET operations.
+Specifically it allows one to specify a range of bytes to get from an existing
+object using --range and specifying the starting/ending byte offsets from the
+start of the object noting the first byte is byte 0.
+
+When there are multiple puts/gets, each get-by-range will apply to a different object.
+On the other hand, using the --ropts, you can change the behavior to apply all the
+GETs to the first object in one or multiple container and/or have each GET increment
+either the first, last or both offsets during each subsequent GET.
+
+NOTE - when specifying --ropts f, it will assume at least one object will have been
+associated with a rank of 0 (the default unless explicitly overridden).
+
+Finally, there's no reason why you even have to do a PUT if you've previously created
+the object, but just remember you'll need to be sure to specify the same container
+as well as object base name.
 
 .SH AUTHENTICATION
 
@@ -345,9 +364,11 @@ Requires use of --latexc, will record exceptions in the named file.  By default,
 file will created if it doesn't exist OR if the option 'c' is specified.
 .RE
 
-.B --latexc seconds[.msec]
+.B --latexc seconds[.msec][:{pg}]
 .RS
 If any operation reports a latency >= to this value, abort the testing.
+Optionally you can specify which operation to apply the test to.  In other words
+--latexc 1:g will only report latencies >= 1 sec for GETs
 .RE
 
 .B --logops
@@ -435,6 +456,39 @@ values used for each connection as it's made.
 Do not display warnings or errors
 .RE
 
+.B --range o1-o2
+.RS
+For each GET operation, retrieve a subset of bytes starting at offet o1 and ending
+inclusively as offset 02.
+.RE
+
+.B --ropts options
+.RS
+Modify the way GETs using --range are performed.
+
+.B f
+.RS
+Always get the first object in the container.  In other words with -n5, you will get
+the same object 5 times using the value in --range rather then getting 5 different
+objects using that same range.
+
+Be sure to keep in mind, that when there are multiple processes, depending on the value
+of --ctype, there may be one or more containers and when there are more than one, the
+first object in each container will be read repeatedly.  When there is a container that
+is shared or bynode, the object associated with node 0 and process 0 will be read by all.
+.RE
+
+.B i1:i2
+.RS
+If --ropts contains a string of this format, the 2 values are interpretted as increments to
+apply to the first and last offset for each operation.  In other words, using --range 10-20
+and --ropts 0:3, the first range retrieved will be 10-20, the second 10-23, and so forth.
+
+NOTE - these increments apply independently to all processes, so if you are running 5
+processes, all 5 will read bytes 10-20, then all 5 will read 10-23, etc.
+.RE
+.RE
+
 .B --repeat number
 .RS
 Repeat all combinations of tests this number of times.  Note that this switch
@@ -450,6 +504,10 @@ test 5 times, so when this switch is used, the headers will only be reported onc
 Specifies the number of times to retry an operation so you don't have to.  The default
 is 5.  Setting this to 0 means you will most likely have to handle failures yourself
 since they are unavoidable.
+
+
+If you are running getputs on multiple nodes and do not at least have 1 running with a
+rank of 0, all GETs will fail with a 404.
 .RE
 
 .B --scheme [http|https][:[address]]

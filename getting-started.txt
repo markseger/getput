@@ -10,7 +10,7 @@ provide additional capabilities or output formats beyond many of the typical
 tests.
 
 This document's intent is to get you started with the basic switches and once
-you are more comfortable with using them, you should be able to discover and 
+you are more comfortable with using them, you should be able to discover and
 play with additional ones by reading the man pages.
 
 PREREQUISITES
@@ -93,7 +93,7 @@ getput -cc -oo -n1 -s1k -tp
 
 which is the simplest of commands.  It tells getput to PUT a single 1k object
 named  'o' to a container named 'c'.  That's all there is to it.  You can name
-the container anything you want as you can also do with the objects.  The 
+the container anything you want as you can also do with the objects.  The
 object sizes can be anything you choose and if you wish to do more then one
 type of test, simply specifiy them as a comma separate list after the -t such
 as -tp,p,g,d which will do a set of PUT tests, then do them again, then do a
@@ -113,7 +113,7 @@ you want to run with multiple processes you can use something like --procs 2
 which will run the test in two parallel threads and like -t you can also repeat
 the tests using a different process count for each.  You can even use multiple
 processes with multiple object sizes, the result of which can be quite a
-number of combinations of tests.  When you do use multiple processes, each 
+number of combinations of tests.  When you do use multiple processes, each
 object includes the process number to assure uniqueness.  See the man page for
 more details on object naming.
 
@@ -133,7 +133,7 @@ to be exceeded will cause the test to terminate and getput will move onto the
 next test.
 
 You should note that when using --runtime, with multiple processes, there is a
-high proability that each PUT test will have written a different number of 
+high proability that each PUT test will have written a different number of
 objects and while getput will keep track of these so a subsequent GET or DELETE
 test can find them, knowledge of these differences will be lost between each
 getput run.
@@ -161,7 +161,7 @@ tests using just a subset of them and so you need to be able specify how many
 to use.
 
 There may also be a remote username and possibly an ssh key required as well.
-And remember that credentials file?  You'll need to give the remote node its 
+And remember that credentials file?  You'll need to give the remote node its
 name so it can source it when running getput.  There's also the notion of
 synchronization between the clients so each starts at the same time in the
 future and so one needs to tell getput how long to delay.
@@ -178,7 +178,7 @@ independent process that is required to make this all work.
 It turns out with all this extra functionality required by gpsuite it was easier
 to write a script that controlled all this and it's called gpmulti, which acts
 as an intermediary between gpsuite and getput.  In other words you run gpsuite
-and it runs gpmulti for you.  
+and it runs gpmulti for you. 
 
 Since you often want to have multiple tests that only vary by one or two test
 parameters, gpsuite allows you to include one stanza's switches in another and
@@ -231,7 +231,7 @@ Command: /usr/bin/gpmulti -cst1 -ost1 -s1k -tp,g,d --nodes st1-compute --numnode
 
 so you can inspect the switches to see if they look correct (or simply have run
 gpsuite with the --dry switch).  But more importantly, you can simply cut/paste the
-gpmulti command and execute it manually, making it real each to see any errors it 
+gpmulti command and execute it manually, making it real each to see any errors it
 may encounter.  But sometimes it may not show any errors in which case you can run that
 command with -d2 and it will show you the ssh command it's running getput with which
 you can also cut/paste/run.  Using this technique you can usually determine what went
