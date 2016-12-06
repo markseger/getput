@@ -28,6 +28,7 @@
 #  256 - print results to terminal instead of log
 
 import glob
+import socket
 import os
 import re
 import sys
@@ -455,7 +456,7 @@ def findbin(name):
 
 if __name__ == "__main__":
 
-    version = '0.2.1'
+    version = '0.2.2'
     copyright = 'Copyright 2014 Hewlett-Packard Development Company, L.P.'
 
     # save command line before anyone else touches it
@@ -469,6 +470,8 @@ if __name__ == "__main__":
     drift = int(options.drift)
     repeat = int(options.repeat)
     suite = options.suite
+
+    hostname = socket.gethostname()
 
     gpmulti_bin = findbin('gpmulti')
     if gpmulti_bin == '':
@@ -524,8 +527,8 @@ if __name__ == "__main__":
     # build name of result logfile
     timestamp = time.strftime('%Y%m%d-%H%M%S')
     if not options.logname:
-        outname = '%s-%s' % \
-            (timestamp, options.suite)
+        outname = '%s-%s-%s' % \
+            (hostname, timestamp, options.suite)
         if options.logmod != '':
             outname += '-%s' % options.logmod
         outname += '.log'
@@ -554,6 +557,8 @@ if __name__ == "__main__":
         print "Writing test results to", outname
         if not options.logname and not debug & 256:
             ofile.write('#%-12s: %s\n' % ('gpsuite', version))
+            ofile.write('#%-12s: %s\n' % ('hostname', hostname))
+
             for param in sorted(vars[suite]):
                 if param == 'options' and options.options:
                     mod = '(new)'

@@ -1,3 +1,14 @@
+0.2.4
+  - new switch --ropts controls how ranges are applied to GETs
+  - extended functionality of --latexc to optionally include
+    which type of operation to apply test to
+  - if a the authentication token expirer during a single get/put/del,
+    one must get a new token and then reconnect (was connecting with
+    old token which had already expired!).  Also, get a new token
+    at the start of every put/get/del since the reconnect varliable
+    in only local to the thread that got it and easier to just
+    get a new connection every time
+
 0.2.3
   - new switches for getput
     --echo  will simply echo the command used to invoke getput which
