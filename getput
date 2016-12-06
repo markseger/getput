@@ -1030,7 +1030,7 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
                        (t1, latency, transID, cname, objname), instance)
 
         # let it continue so all the cleanup stuff find objects to delete
-        if latency >= latexc_min and latency <= latexc_max and re.search(latexc_filt, 'p'):
+        if latency >= latexc_min and latency <= latexc_max and re.search('p', latexc_filt):
             start = time.strftime('%Y%m%d %H:%M:%S', time.gmtime(t1))
             text = "%s PUT latency exception: %6.3f secs " \
                 "ObjSize: %4s TransID: %s Tries: %d Obj: %s/%s" % \
@@ -1216,7 +1216,7 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
             logger(2, "%f  %f  %s  %s/%s" % \
                        (t1, latency, transID, cname, objname), instance)
 
-        if latency >= latexc_min and latency <= latexc_max and re.search(latexc_filt, 'g'):
+        if latency >= latexc_min and latency <= latexc_max and re.search('g', latexc_filt):
             start = time.strftime('%Y%m%d %H:%M:%S', time.gmtime(t1))
             text = "%s GET latency exception: %6.3f secs " \
                 "ObjSize: %4s TransID: %s Tries: %d Obj: %s/%s" % \
