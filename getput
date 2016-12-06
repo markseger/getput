@@ -178,7 +178,7 @@ def getenv(varname):
     return(value)
 
 
-def parse_creds():
+def parse_creds(creds_file=None):
     """
     parse credentials either from environment OR credentials file
     """
@@ -194,10 +194,40 @@ def parse_creds():
     osnum = 0
     osvars = {}
     for varname in ['OS_AUTH_URL', 'OS_USERNAME', 'OS_PASSWORD', \
-                        'OS_TENANT_ID', 'OS_TENANT_NAME', 'OS_PROJECT_NAME']:
+                        'OS_TENANT_ID', 'OS_TENANT_NAME', \
+                        'OS_PROJECT_NAME', 'OS_PROJECT_ID', \
+                        'OS_PROJECT_DOMAIN_NAME', 'OS_PROJECT_DOMAIN_ID', \
+                        'OS_USER_DOMAIN_NAME', 'OS_USER_DOMAIN_ID', \
+                        'OS_REGION_NAME', 'OS_SERVICE_TYPE', 'OS_AUTH_VERSION', \
+                        'OS_ENDPOINT_TYPE', 'OS_IDENTITY_API_VERSION', \
+                        'SWIFTCLIENT_INSECURE', 'OS_CACERT', 'OS_CERT']:
         osvars[varname] = getenv(varname)
         if osvars[varname] != '':
             osnum += 1
+
+    if creds_file:
+        try:
+            f = open(creds_file, 'r')
+            for line in f:
+                if re.match('\#|\s*$', line):
+                    continue
+                line = line.rstrip('\n')
+
+                search = re.search('(ST|OS|SWIFTCLIENT)_(.*)=(.*)', line)
+                if search:
+                    value = search.group(3).strip(";'\"")
+                    if search.group(1) == 'ST':
+                        stvars["ST_" + search.group(2)] = value
+                        stnum += 1
+                    elif search.group(1) == 'OS':
+                        osvars["OS_" + search.group(2)] = value
+                        osnum += 1
+                    elif search.group(1) == 'SWIFTCLIENT':
+                        osvars["SWIFTCLIENT_" + search.group(2)] = value
+                        osnum += 1
+
+        except IOError, err:
+            error("Couldn't read creds file: " + creds_file)
 
     if stnum > 0 and  osnum > 0:
         error('you have both ST_ and OS_style varibles defined' + \
@@ -209,24 +239,28 @@ def parse_creds():
                                        or osvars['OS_PASSWORD'] == '':
             error('your environment has at least 1 OS_ style variable ' + \
                   'defined but not OS_AUTH_URL, OS_USERNAME or OS_PASSWORD')
-        if osvars['OS_TENANT_NAME'] == '' and osvars['OS_TENANT_ID'] == '' and osvars['OS_PROJECT_NAME'] == '':
+        if osvars['OS_TENANT_NAME'] == '' and osvars['OS_TENANT_ID'] == '' \
+                                          and osvars['OS_PROJECT_NAME'] == ''\
+                                          and osvars['OS_PROJECT_ID'] == '':
             error('your environment has at least 1 OS_ style variable ' + \
-                  'defined but not OS_TENANT_NAME, OS_TENANT_ID or OS_PROJECT_NAME')
+                  'defined but not OS_TENANT_NAME, OS_TENANT_ID or ' + \
+                  'OS_PROJECT_NAME, OS_PROJECT_ID')
 
-    username = password = authurl = tenant_id = tenant_name = ''
+    username = password = authurl = ''
+
     if stnum > 1:
         authurl = stvars['ST_AUTH']
         username = stvars['ST_USER']
         password = stvars['ST_KEY']
-        tenant_id = tenant_name = ''
     elif osnum > 1:
         authurl = osvars['OS_AUTH_URL']
+        del osvars['OS_AUTH_URL']
         username = osvars['OS_USERNAME']
+        del osvars['OS_USERNAME']
         password = osvars['OS_PASSWORD']
-        tenant_id = osvars['OS_TENANT_ID']
-        tenant_name = osvars['OS_TENANT_NAME']
+        del osvars['OS_PASSWORD']
 
-    return((authurl, username, password, tenant_id, tenant_name))
+    return((authurl, username, password, osvars))
 
 
 def main(argv):
@@ -235,7 +269,7 @@ def main(argv):
     """
 
     global debug, options, procset, sizeset, ldist10
-    global username, password, authurl, tenant_id, tenant_name, errmax
+    global username, password, authurl, osvars, errmax
     global latexc_min, latexc_max, latexc_filt, exclog, excopt, sha_size
 
     ldist10 = 0
@@ -384,8 +418,9 @@ def main(argv):
         sys.exit()
 
     #    T h e s e    h a v e    d e f a u l t s
+    #    G e t    C r e d e n t i a l s    f r o m    C r e d s    F i l e
 
-    (authurl, username, password, tenant_id, tenant_name) = parse_creds()
+    (authurl, username, password, osvars) = parse_creds(options.creds)
 
     try:
         debug = int(options.debug)
@@ -397,48 +432,6 @@ def main(argv):
     except ValueError:
         error('--errmax must be an integer')
 
-    #    G e t    C r e d e n t i a l s    f r o m    C r e d s    F i l e
-
-    if options.creds:
-        creds = options.creds
-        try:
-            f = open(creds, 'r')
-            user = password = authurl = ''
-            for line in f:
-                if re.match('\#|\s*$', line):
-                    continue
-                line = line.rstrip('\n')
-
-                search = re.search('OS_AUTH_URL=(.*)', line) or \
-                         re.search('ST_AUTH=(.*)', line)
-                if search:
-                    authurl = search.group(1)
-                    authurl = authurl.strip(";'\"")
-
-                search = re.search('OS_USERNAME=(.*)', line) or \
-                         re.search('ST_USER=(.*)', line)
-                if search:
-                    username = search.group(1)
-                    username = username.strip(";'\"")
-
-                search = re.search('OS_PASSWORD=(.*)', line) or \
-                         re.search('ST_KEY=(.*)', line)
-                if search:
-                    password = search.group(1)
-                    password = password.strip(";'\"")
-
-                search = re.search('OS_TENANT_ID=(.*)', line)
-                if search:
-                    tenant_id = search.group(1)
-                    tenant_id = tenant_id.strip(";'\"")
-
-                search = re.search('OS_TENANT_NAME=(.*)', line)
-                if search:
-                    tenant_name = search.group(1)
-                    tenant_name = tenant_name.strip(";'\"")
-
-        except IOError, err:
-            error("Couldn't read creds file: " + creds)
 
     #     R e q u i r e d :   - - t e s t s    &    - - c n a m e
 
@@ -635,13 +628,17 @@ if not hasattr(Connection, 'close'):
                 self.http_conn[1].close()
 
 
-def connect(authurl, username, password, tenant_id, tenant_name, \
+def connect(authurl, username, password, osvars, \
                 preauthurl=None, preauthtoken=None):
     """
     make a connection to swift
     """
 
-    if re.search('v1.0', authurl):
+    if 'OS_AUTH_VERSION' in osvars:
+        auth_version = osvars['OS_AUTH_VERSION']
+    elif 'OS_IDENTITY_API_VERSION' in osvars:
+        auth_version = osvars['OS_IDENTITY_API_VERSION']
+    elif re.search('v1.0', authurl):
         auth_version = '1.0'
     elif re.search('v2.0', authurl):
         auth_version = '2.0'
@@ -649,21 +646,26 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
         auth_version = '3'
 
     # simple 1:1 mapping to parameter value
-    cacert = os.environ.get('OS_CACERT')
-    insecure = options.insecure
+    cacert = None
+    if 'OS_CACERT' in osvars:
+        cacert = osvars['OS_CACERT']
+
+    if 'SWIFTCLIENT_INSECURE' in osvars:
+        insecure = osvars['SWIFTCLIENT_INSECURE']
+    else:
+        insecure = options.insecure
+
     retries = int(options.retries)
 
     # these get specified in opts dictionary noting BOTH tenant_id
     # and _name must be defined in dictionary
     os_options = {}
-    os_options['tenant_id'] = os_options['tenant_name'] = None
-    if tenant_id != '':
-        os_options['tenant_id'] = tenant_id
-    if tenant_name != '':
-        os_options['tenant_name'] = tenant_name
-    os_options['project_name'] = 'admin'
-    os_options['object_storage_url'] = os.environ.get('OS_STORAGE_URL')
-    os_options['endpoint_type'] = os.environ.get('OS_ENDPOINT_TYPE')
+    for key, value in osvars.iteritems():
+        if value == "":
+            continue
+        key = key.replace("OS_", "")
+        key = key.lower()
+        os_options[key] = value
 
     if preauthurl != None:
         authurl = ''
@@ -673,7 +675,7 @@ def connect(authurl, username, password, tenant_id, tenant_name, \
         print "Connect - Retries: %d AuthVer: %s AuthURL: %s" % \
             (retries, auth_version, authurl)
         print "Connect - Insecure: %s  Cert: %s" % \
-            (options.insecure, cacert)
+            (insecure, cacert)
         print "Connect - PreauthURL: %s PreauthToken: %s" % \
             (preauthurl, preauthtoken)
 
@@ -985,16 +987,15 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
             if err.http_status == 401:
                 api_error('token expired, retry put', instance, cname, objname, err)
                 puts -= 1
-
-                connection = connect(authurl, username, password, \
-                             tenant_id, tenant_name)
+                
+                connection = connect(authurl, username, password, osvars, \
+                                         preauthurl, preauthtoken)
                 if connection == -1:
                     error('Error: ClientException connect error')
                 preauthtoken = connection.token
 
-                connection = connect(authurl, username, password, \
-                                         tenant_id, tenant_name, \
-                                         preauthurl,preauthtoken)
+                connection = connect(authurl, username, password, osvars, \
+                                         preauthurl, preauthtoken)
             else:
                 api_error('put', instance, cname, objname, err, response)
             continue
@@ -1166,15 +1167,14 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
                 api_error('token expired, retry get', instance, cname, objname, err)
                 gets -= 1
 
-                connection = connect(authurl, username, password, \
-                             tenant_id, tenant_name)
+                connection = connect(authurl, username, password, osvars, \
+                                         preauthurl, preauthtoken)
                 if connection == -1:
                     error('Error: ClientException connect error')
                 preauthtoken = connection.token
 
-                connection = connect(authurl, username, password, \
-                                         tenant_id, tenant_name, \
-                                         preauthurl,preauthtoken)
+                connection = connect(authurl, username, password, os_vars, \
+                                         preauthurl, preauthtoken)
             else:
                 api_error('get', instance, cname, objname, err, response)
             continue
@@ -1298,16 +1298,16 @@ def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
             if err.http_status == 401:
                 api_error('token expired, retry del', instance, cname, objname, err)
                 dels -= 1
+                
+                connection = connect(authurl, username, password, osvars, \
+                                         preauthurl, preauthtoken)
 
-                connection = connect(authurl, username, password, \
-                             tenant_id, tenant_name)
                 if connection == -1:
                     error('Error: ClientException connect error')
                 preauthtoken = connection.token
 
-                connection = connect(authurl, username, password, \
-                                         tenant_id, tenant_name, \
-                                         preauthurl,preauthtoken)
+                connection = connect(authurl, username, password, osvars, \
+                                         preauthurl, preauthtoken)
             else:
                 api_error('del', instance, cname, objname, err, response)
             continue
@@ -1426,8 +1426,7 @@ def execute_proc(args):
 
     if debug & 64:
         print "*** Actual Connect using preauthurl/preauthtokens"
-    connection = connect(authurl, username, password, \
-                             tenant_id, tenant_name, \
+    connection = connect(authurl, username, password, osvars, \
                              preauthurl, preauthtoken)
     if connection == -1:
         return(['Error: ClientException connect error'])
@@ -1818,8 +1817,7 @@ if __name__ == "__main__":
                 print "%s=%s" % (env, os.environ.get(env))
 
         print "*** Initial Connect - get preauthtoken/preauthurl"
-    connection = connect(authurl, username, password, \
-                             tenant_id, tenant_name)
+    connection = connect(authurl, username, password, osvars)
     if connection == -1:
         error('Error: ClientException connect error')
     preauthtoken = connection.token

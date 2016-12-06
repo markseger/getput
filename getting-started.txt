@@ -61,6 +61,16 @@ export OS_PASSWORD=password
 export OS_TENANT_NAME=tenant
 export OS_CACERT=certfile
 
+Furthermore keystone v3 is supported via the following variables.
+
+export OS_AUTH_URL=https://endpoint.com:5000/v3/
+export OS_AUTH_VERSION=3
+export OS_USERNAME=mjs
+export OS_PASSWORD=password
+export OS_PROJECT_NAME=project
+export OS_PROJECT_DOMAIN_NAME=domain
+export OS_USER_DOMAIN_NAME=domain
+
 Having created this file all you need to do is 'source' it to export the values into
 your environment.  If you want to use gpsuite (described later), a file of this
 format is required so it is useful to start using one with getput.  To make sure
