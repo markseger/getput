@@ -200,6 +200,7 @@ def parse_creds(creds_file=None):
                         'OS_USER_DOMAIN_NAME', 'OS_USER_DOMAIN_ID', \
                         'OS_REGION_NAME', 'OS_SERVICE_TYPE', 'OS_AUTH_VERSION', \
                         'OS_ENDPOINT_TYPE', 'OS_IDENTITY_API_VERSION', \
+                        'OS_STORAGE_URL', \
                         'SWIFTCLIENT_INSECURE', 'OS_CACERT', 'OS_CERT']:
         osvars[varname] = getenv(varname)
         if osvars[varname] != '':
@@ -649,6 +650,9 @@ def connect(authurl, username, password, osvars, \
     cacert = None
     if 'OS_CACERT' in osvars:
         cacert = osvars['OS_CACERT']
+
+    if 'OS_STORAGE_URL' in osvars:
+        osvars['object_storage_url'] = osvars['OS_STORAGE_URL']
 
     if 'SWIFTCLIENT_INSECURE' in osvars:
         insecure = osvars['SWIFTCLIENT_INSECURE']
