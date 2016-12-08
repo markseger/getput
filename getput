@@ -635,9 +635,9 @@ def connect(authurl, username, password, osvars, \
     make a connection to swift
     """
 
-    if 'OS_AUTH_VERSION' in osvars:
+    if osvars['OS_AUTH_VERSION'] != '':
         auth_version = osvars['OS_AUTH_VERSION']
-    elif 'OS_IDENTITY_API_VERSION' in osvars:
+    elif osvars['OS_IDENTITY_API_VERSION'] != '':
         auth_version = osvars['OS_IDENTITY_API_VERSION']
     elif re.search('v1.0', authurl):
         auth_version = '1.0'
