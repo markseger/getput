@@ -456,7 +456,7 @@ def findbin(name):
 
 if __name__ == "__main__":
 
-    version = '0.2.2'
+    version = '0.2.3'
     copyright = 'Copyright 2014 Hewlett-Packard Development Company, L.P.'
 
     # save command line before anyone else touches it
@@ -555,7 +555,7 @@ if __name__ == "__main__":
 
         # only if not a dry run, and for now if not --logname
         print "Writing test results to", outname
-        if not options.logname and not debug & 256:
+        if not debug & 256:
             ofile.write('#%-12s: %s\n' % ('gpsuite', version))
             ofile.write('#%-12s: %s\n' % ('hostname', hostname))
 
