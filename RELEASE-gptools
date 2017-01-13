@@ -1,3 +1,11 @@
+GPSUITE
+0.2.3
+  - wasn't writing headers to logs when --logname used
+
+GETPUT
+0.2.5
+  - last patch broke --insecure
+
 0.2.4
   - new switch --ropts controls how ranges are applied to GETs
   - extended functionality of --latexc to optionally include
