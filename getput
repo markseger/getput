@@ -201,7 +201,7 @@ def parse_creds(creds_file=None):
                         'OS_REGION_NAME', 'OS_SERVICE_TYPE', 'OS_AUTH_VERSION', \
                         'OS_ENDPOINT_TYPE', 'OS_IDENTITY_API_VERSION', \
                         'OS_STORAGE_URL', \
-                        'SWIFTCLIENT_INSECURE', 'OS_CACERT', 'OS_CERT']:
+                        'OS_SWIFTCLIENT_INSECURE', 'OS_CACERT', 'OS_CERT']:
         osvars[varname] = getenv(varname)
         if osvars[varname] != '':
             osnum += 1
@@ -654,11 +654,12 @@ def connect(authurl, username, password, osvars, \
     if 'OS_STORAGE_URL' in osvars:
         osvars['object_storage_url'] = osvars['OS_STORAGE_URL']
 
-    if 'SWIFTCLIENT_INSECURE' in osvars:
-        insecure = osvars['SWIFTCLIENT_INSECURE']
+    if osvars['OS_SWIFTCLIENT_INSECURE'] != '':
+        insecure = osvars['OS_SWIFTCLIENT_INSECURE']
     else:
         insecure = options.insecure
 
+    insecure = 1
     retries = int(options.retries)
 
     # these get specified in opts dictionary noting BOTH tenant_id
@@ -1721,7 +1722,7 @@ header_printed = 0
 
 if __name__ == "__main__":
 
-    version = '0.2.4'
+    version = '0.2.5'
     copyright = 'Copyright 2016 Hewlett-Packard Development Company, L.P.'
 
     # Needs to be defined before anything else for error logging
