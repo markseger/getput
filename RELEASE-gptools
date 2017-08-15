@@ -3,6 +3,8 @@ GPSUITE
   - wasn't writing headers to logs when --logname used
 
 GETPUT
+0.2.6
+  - changed --range functionality to allow list of ranges AND removed --ropts
 0.2.5
   - last patch broke --insecure
 
