@@ -138,21 +138,11 @@ would cause a new container name to be generated each time getput is run.
 .SH GET BY RANGE
 
 This feature has been added as of V0.2.3 and only applies to GET operations.
-Specifically it allows one to specify a range of bytes to get from an existing
+Specifically it allows one to specify ranges of bytes to get from an existing
 object using --range and specifying the starting/ending byte offsets from the
-start of the object noting the first byte is byte 0.
+start of the object as comma separated pairs, noting the first byte is byte 0.
 
 When there are multiple puts/gets, each get-by-range will apply to a different object.
-On the other hand, using the --ropts, you can change the behavior to apply all the
-GETs to the first object in one or multiple container and/or have each GET increment
-either the first, last or both offsets during each subsequent GET.
-
-NOTE - when specifying --ropts f, it will assume at least one object will have been
-associated with a rank of 0 (the default unless explicitly overridden).
-
-Finally, there's no reason why you even have to do a PUT if you've previously created
-the object, but just remember you'll need to be sure to specify the same container
-as well as object base name.
 
 .SH AUTHENTICATION
 
@@ -460,33 +450,6 @@ Do not display warnings or errors
 .RS
 For each GET operation, retrieve a subset of bytes starting at offet o1 and ending
 inclusively as offset 02.
-.RE
-
-.B --ropts options
-.RS
-Modify the way GETs using --range are performed.
-
-.B f
-.RS
-Always get the first object in the container.  In other words with -n5, you will get
-the same object 5 times using the value in --range rather then getting 5 different
-objects using that same range.
-
-Be sure to keep in mind, that when there are multiple processes, depending on the value
-of --ctype, there may be one or more containers and when there are more than one, the
-first object in each container will be read repeatedly.  When there is a container that
-is shared or bynode, the object associated with node 0 and process 0 will be read by all.
-.RE
-
-.B i1:i2
-.RS
-If --ropts contains a string of this format, the 2 values are interpretted as increments to
-apply to the first and last offset for each operation.  In other words, using --range 10-20
-and --ropts 0:3, the first range retrieved will be 10-20, the second 10-23, and so forth.
-
-NOTE - these increments apply independently to all processes, so if you are running 5
-processes, all 5 will read bytes 10-20, then all 5 will read 10-23, etc.
-.RE
 .RE
 
 .B --repeat number

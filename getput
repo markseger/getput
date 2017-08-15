@@ -363,8 +363,6 @@ def main(argv):
                       action='store_true')
     groupc.add_option('--range',   dest='range', default='',
                       help='get object by this range')
-    groupc.add_option('--ropts',   dest='ropts', default='',
-                      help='get-by-range options')
     groupc.add_option('--repeat',   dest='repeats',
                       help='number of time to repeat --num tests')
     groupc.add_option('--retries',  dest='retries', default='5',
@@ -455,7 +453,7 @@ def main(argv):
         objopts = re.sub('[acfu]*', '', options.objopts)
         if re.search('r', objopts):
             match = re.search('r(\d*)', objopts)
-            sha_size = 128 if not match else int(match.group(1))
+            sha_size = 128 if match.group(1) == ''  else int(match.group(1))
             objopts = re.sub(match.group(0), '', objopts)
         if objopts != '':
             error("unknown --objopts values: %s" % objopts)
@@ -482,18 +480,6 @@ def main(argv):
         for value in options.range.split(','):
             if not re.match('\d+-\d+$', value):
                 error("range '%s' must be in min-max format" % (value))
-
-    if options.ropts != '':
-        if options.range == '':
-            error('--ropts only applies to --range')
-        ropts = options.ropts
-        if re.search('f', ropts):
-            ropts = re.sub('f', '', ropts)
-        match = re.search('(\d+:\d+)', ropts)
-        if match:
-            ropts = re.sub(match.group(0), '', ropts)
-        if ropts != '':
-            error('invalid --ropts value(s): %s' % ropts)
 
     if re.match('[gpd]', options.tests):
         if not options.oname:
@@ -1068,28 +1054,6 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
     number of operations is reached
     """
 
-    # we may need to dynamically change offsets 
-    range_sameobj = False
-    range_first = range_last = 0
-    range_incrF = range_incrL = 0
-    if options.range != '':
-        (o1, o2) = options.range.split('-')
-        range_first = int(o1)
-        range_last = int(o2)
-    match = re.search('(\d+:\d+)', options.ropts)
-    if match:
-        (o1, o2) = match.group(0).split(':')
-        range_incrF = int(o1)
-        range_incrL = int(o2)
-
-    # this is complicated because the base oname has already been set before we were
-    # called but we need to reset it so the same first object will be read by all
-    if re.search('f', options.ropts):
-        range_sameobj = True
-        if options.ctype != 'byproc':
-            oname = re.sub('-\d+-\d+$', '', oname)    # strip rank/instance
-            oname += '-0-0'                           # put back -0-0    
-
     lat_dist = []
     for i in range(11):
         lat_dist.append(0)
@@ -1131,13 +1095,6 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
         if re.search('r', options.objopts):
             objname = hashlib.sha512(objname + '*' + options.objseed).hexdigest()[0:sha_size]
 
-        # when --ropts set to 'f', we ALWAYS get first object
-        if options.ropts != '':
-            if gets == 1:
-                first_objname = objname
-            if range_sameobj == True:
-                objname = first_objname
-
         gets = gets + 1
         t1 = time.time()
         try:
@@ -1145,7 +1102,8 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
             body = []
             headers = {}
             if options.range != '':
-                headers['Range'] = 'bytes=%s-%s' % (range_first, range_last)
+                headers['Range'] = "bytes=%s" % options.range
+
             if options.extra:
                 headers['X-Trans-Id-Extra'] = options.extra
 
@@ -1153,7 +1111,7 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
                 text = "%s GET CName: %s  OName: %s Inst: %d" % \
                     (time.strftime('%H:%M:%S'), cname, objname, instance)
                 if options.range != '':
-                    text += " Range: %d-%d" % (range_first, range_last)
+                    text += " Range: %s" % options.range
                 print text
 
             headers, body = connection.get_object(cname, objname,
@@ -1161,10 +1119,6 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
                                                   response_dict=response,
                                                   resp_chunk_size=65536)
             transID = response['headers']['x-trans-id']
-
-            # basically a no-op if --range not set
-            range_first += range_incrF
-            range_last += range_incrL
 
         except ClientException as err:
             errs = errs + 1
@@ -1197,6 +1151,7 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
         # if etag checking is fast enough for swift to do all the time, so can I
         m = md5.new()
         for chunk in body:
+	    #print "CHUNK:", len(chunk)
             m.update(chunk)
             if len(chunk) == 0:
                 break
@@ -1214,8 +1169,8 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
         tries = connection.attempts
         retries += tries - 1
         if debug & 32:
-            print "%f  %f  TransID: %s Latency: %9.6f Tries: %d %s/%s Range: %d-%d" % \
-                (t1, t2, transID, latency, tries, cname, objname, range_first, range_last)
+            print "%f  %f  TransID: %s Latency: %9.6f Tries: %d %s/%s Read: %d" % \
+                (t1, t2, transID, latency, tries, cname, objname, objsize)
 
         if logmask & 1 or (logmask & 4 and latency > sizelat[sizenum]):
             logger(2, "%f  %f  %s  %s/%s" % \
@@ -1722,7 +1677,7 @@ header_printed = 0
 
 if __name__ == "__main__":
 
-    version = '0.2.5'
+    version = '0.2.6'
     copyright = 'Copyright 2016 Hewlett-Packard Development Company, L.P.'
 
     # Needs to be defined before anything else for error logging
