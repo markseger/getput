@@ -124,6 +124,8 @@ def main(argv):
                       help="don't print any headers", action='store_true')
     group2.add_option('--objopts',  dest='objopts', default='',
                       help='object options [acfu]')
+    group2.add_option('--objseed',  dest='objseed', default='',
+                      help='object seed')
     group2.add_option('--preauthtoken', dest='preauthtoken',
                       help="tell getput to use a pre-defined preauthtoken",
                       default='')
@@ -133,9 +135,12 @@ def main(argv):
                       help="number of processes to run")
     group2.add_option('--proxies',  dest='proxies', default='',
                       help='bypass load balancer and connect directly')
+    group2.add_option('--quiton404', dest='quiton404', default=False,
+                      help='exit on 404', action='store_true')
     group2.add_option('--quiet',    dest='quiet', default=False,
                       help='suppress api errors & sync time warnings',
                       action='store_true')
+    group2.add_option('--range',  dest='range', help="range")
     group2.add_option('--runtime',  dest='runtime',
                       help="runtime in secs")
     group2.add_option('--scheme',  dest='scheme',
@@ -353,11 +358,20 @@ def build_command(synctime, test, size_index, procs, utc, putcount):
     if options.objopts:
         command += " --objopts %s" % options.objopts
 
+    if options.objseed:
+        command += " --objseed %s" % options.objseed
+
     if options.proxies:
         command += " --proxies %s" % options.proxies
 
     if options.quiet:
         command += " --quiet"
+
+    if options.quiton404:
+        command += " --quiton404"
+
+    if options.range:
+        command += " --range %s" % options.range
 
     if options.runtime:
         command += " --runtime %d" % runtime
@@ -584,7 +598,7 @@ def delcont(cname):
 
 if __name__ == "__main__":
 
-    version = '0.2.1'
+    version = '0.2.2'
     copyright = 'Copyright 2016 Hewlett-Packard Development Company, L.P.'
 
     main(sys.argv[1:])

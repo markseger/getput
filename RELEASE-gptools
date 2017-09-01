@@ -1,8 +1,27 @@
 GPSUITE
+0.2.5
+  - make sure nodefill, maxnode and runtime and procs not set to zero
+0.2.4
+  - handle --objseed and --range
+  - catch error when procs, and a few other parameters are 0
+  - removed ropts
 0.2.3
   - wasn't writing headers to logs when --logname used
 
+GPMULTI
+0.2.3
+  - suppose for passing --quiton404 to getput
+0.2.2
+  - remove ropts
+
 GETPUT
+0.2.6.7
+  - new options to support random/range operations
+    - --quiton404 for when you try to read/del an object beyond those written
+    - --objopts mxx says to use a modulus of process number to allow reading
+      objects with higher process numbers than those written
+    - on GET, returns bytes read, not value on -s
+
 0.2.6
   - changed --range functionality to allow list of ranges AND removed --ropts
 0.2.5

@@ -228,9 +228,19 @@ def config_check():
                 'sizes', 'procs', 'runtime']:
         if var in vars[suite]:
             try:
-                if re.match('nodefill|maxnodes|runtime', var):
+                # this used to only look at nodefill, maxnodes and runtime
+                # and I can't remember why, but I think we need to look at
+                # any of these that should be a positive number
+		if re.match('nodefill|maxnodes|runtime', var):
                     temp = int(vars[suite][var])
-                elif re.match('maxhours', var):
+		    if temp == 0:
+			error("'%s' cannot be 0" % var)
+		elif var == 'procs':
+		    for proc in vars[suite][var].split(','):
+                        temp = int(proc)
+                        if temp == 0:
+                            error("'%s' cannot be 0" % var)
+                elif var == 'maxhours':
                     temp = float(vars[suite][var])
             except ValueError:
                 error("invalid value for --%s: %s" % (var, vars[suite][var]))
@@ -355,12 +365,10 @@ def config_check():
                 vars[suite]['tests'] = switches[i + 1]
 
     tfile = open(vars[suite]['nodes'], 'r')
-
     max = int(vars[suite]['maxnodes'])
     ping_fail = 0
     if not debug & 32:
         num = 0
-
         ssh_base = 'ssh '
         if 'sshkey' in vars[suite]:
             ssh_base += '-i %s ' % vars[suite]['sshkey']
@@ -456,7 +464,7 @@ def findbin(name):
 
 if __name__ == "__main__":
 
-    version = '0.2.3'
+    version = '0.2.4'
     copyright = 'Copyright 2014 Hewlett-Packard Development Company, L.P.'
 
     # save command line before anyone else touches it

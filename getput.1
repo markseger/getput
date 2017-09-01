@@ -120,17 +120,25 @@ also possible to reduce the name size if you want to keep them smaller, but keep
 in mind since that results in simply using part of the hash string you could get
 duplicates and never know it so don't make them too small.
 
-It may also be desirable to append to a container already containign a number of
-randomly names objects and that too is no problem, with the addition of the new
-switch --objseed.  Just like seeds are using with random number generator to
+It may also be desirable to append to a container already containing a number of
+randomly names objects and that too is no problem, with the addition of the 2nd
+new switch --objseed.  Just like seeds are used with random number generators to
 change the algoritm between runs, this is similar in the sense that the seed
-is appended to the object name because converting it to a sha512 string.  This
+is appended to the object name before converting it to a sha512 string.  This
 means if you change the seed between runs, you'll essentially generate new
-object names.  Further you can still access them by just using the same seed they
-were created with.
+object names.  Further you can still access any set of random objects from 
+previous runs by just using the same seed they were created with.
+
+However there is a new problem this introduces and that is if you want to access
+old object using random names, especially with multiple --procs, you never know
+how many were actually created for each proc and can't list them to see their
+original names. The solution is a 3rd new switch which also works on non-random
+object names as well and that is --quiton404, which tell getput to read based on
+-n and -r but if you try to read too deeply and hit a 404, simply quit instead
+of throwing an error.
 
 One final thing to keep in mind is that if you want to create a lot of objects
-in the same using multiple processes, be sure to specify --ctype shared or
+in the same container using multiple processes, be sure to specify --ctype shared or
 else you'll end up with one container per process.  It you want to append to
 an existing container, also remember to NOT use the --utc switch because that
 would cause a new container name to be generated each time getput is run.
@@ -142,7 +150,24 @@ Specifically it allows one to specify ranges of bytes to get from an existing
 object using --range and specifying the starting/ending byte offsets from the
 start of the object as comma separated pairs, noting the first byte is byte 0.
 
-When there are multiple puts/gets, each get-by-range will apply to a different object.
+When there are multiple puts/gets, the same get-by-range will apply to each object.
+
+There is an interesting behavior with ranged GETs and that is when benchmarking
+using many processes with which you wish to push swift to its max. IYou can 
+easily find yourself in a situation where you can run many more processes for
+GETs than PUTs since the object being retrieved may be much smaller and therefore
+able to sustain higher levels of parallelism. Say you created a bunch of 100MB
+objects using 16 processes because of bandwidth limitations but want to read them
+back as 1KB chunks using --range and 100 processes. Since the process number is
+actually part of the object name (and even used when creating a random name),
+doing a GET for process 17 will fail with a 404!  Specifying --objopts m16 will
+remap process 17, 33, etc all to process 1.
+
+One other thing to keep in mind is when you look at the object size return by a
+GET, it report the actual number of bytes retrieved. If you use a single range
+of 64K on a 1M object, you see see a size of 64K. BUT since multiple ranged
+GETs actually including formatting to separate the pieces returned you will get
+more than 128K returned and it is this number that is reported.
 
 .SH AUTHENTICATION
 
@@ -390,6 +415,14 @@ highly compressible.
 .RS
 Objects will be named as a flat namespace using an single incrementing count.
 .RE
+.B mxxx
+When objects are created by multiple processes, the process number becomes part
+of the object name OR is included before hashing into a random string. On rare
+occasions it may be desireable to access those objects using a higher process
+count than was used to create them. By specifying xxx, this is applied as a
+modulus against the process number to assume a valid process number is always
+used.
+.RE
 .B r[xxx]
 .RS
 Use 128 byte random object names by generating a sha512 digest based on the
@@ -400,6 +433,13 @@ objects ordinal numbering.  You can optionally specify an object name length.
 The base name of an object will have the UTC time appended, making it possible
 to do sequential appends to an existing container.
 .RE
+.RE
+
+.B --objoffset num
+.RS
+When accessing flat hierarchies (not clear if really needed now that random
+object names are supported for large containers), start object names using
+this as an object instance number.
 .RE
 
 .B --objseed num
@@ -446,10 +486,16 @@ values used for each connection as it's made.
 Do not display warnings or errors
 .RE
 
-.B --range o1-o2
+.B --quiton404
 .RS
-For each GET operation, retrieve a subset of bytes starting at offet o1 and ending
-inclusively as offset 02.
+When an object cannot be found for a GET or DELETE operation, quit without an error.
+.RE
+
+.B --range r1-r2[,r3-r4...]
+.RS
+For each GET operation, retrieve a subset of bytes starting at offet r1 and ending
+inclusively as offset r2. In fact there are multiple formats --range supports and
+whatever is specified is passed along in the REST interface
 .RE
 
 .B --repeat number

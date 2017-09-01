@@ -16,9 +16,9 @@ play with additional ones by reading the man pages.
 PREREQUISITES
 -------------
 
-The focus of this section is on Ubuntu based installations.  While there is
-no reason why these instructions shouldn't work on other distributions, they
-have not been tested anywhere other than Ubuntu.
+The focus of this section is on Suse and Ubuntu based installations. While 
+there is no reason why these instructions shouldn't work on other distributions,
+they have not been tested anywhere other than these
 
 The only requirement for using getput is that you have installed
 python-swiftclient and the easiest way to do that is by using pip.  If it is
@@ -34,54 +34,40 @@ pip install python-swiftclient
 AUTHENTICATION
 -------------
 
-Getput currently supports 2 types of authentication, v1 and v2.  v2 additionally
-requires python-keystoneclient which can be installed with pip the same way as
+Getput currently several types of authentication, though the going the most
+currently used (and tested with) is V3, which also requires 
+python-keystoneclient and can be installed with pip the same way as
 python-swiftclient.  The one caveat is I have found environments in which there
 were unmet dependencies which also had to be installed.
 
 The very first thing you'll need to do before trying to run getput is to verify
-your credentials have been correctly defined and the easiest way to do this,
-which is also described in the man page, is to set up what I call a credentials
-file.  I have multiple files for accessing multiple clusters and those that
-support v1 authentication look liket this:
+your credentials have been correctly defined and there are different
+combinations which may be dependent on your environment. This is not intended
+to be an extensive discussion of authentication. 
 
-export ST_AUTH=https://endpoint.com:35357/auth/v1.0/
-export ST_USER=1234567890:mjs
-export ST_KEY=password
+The easiest way to do this, which is also described in the man page, is to set
+up what I call a credentials file.  I have multiple files for accessing multiple
+clusters and those that support v3 authentication on one of my systems look like
+this:
 
-You can also use v2 authentication which requires keystoneclient also be installed
-and those credentials look like this, noting you can't have both defined at the same
-time.  Also note that OS_CACERT is optional but if you don't include it you may get
-authentication errors which can only be overcome by including --insecure with the
-getput command.
-
-export OS_AUTH_URL=https://endpoint.com:35357/auth/v2.0/
+export OS_IDENTITY_API_VERSION=3
+export OS_PROJECT_NAME=admin
 export OS_USERNAME=mjs
-export OS_PASSWORD=password
-export OS_TENANT_NAME=tenant
-export OS_CACERT=certfile
+export OS_PASSWORD=xxx
+export OS_AUTH_URL=https://192.168.24.161:5000/v3
 
-Furthermore keystone v3 is supported via the following variables.
-
-export OS_AUTH_URL=https://endpoint.com:5000/v3/
-export OS_AUTH_VERSION=3
-export OS_USERNAME=mjs
-export OS_PASSWORD=password
-export OS_PROJECT_NAME=project
-export OS_PROJECT_DOMAIN_NAME=domain
-export OS_USER_DOMAIN_NAME=domain
-
-Having created this file all you need to do is 'source' it to export the values into
-your environment.  If you want to use gpsuite (described later), a file of this
-format is required so it is useful to start using one with getput.  To make sure
-you have set up your credentials correctly, source the file and run the command:
+Having created this file all you need to do is 'source' it to export the values
+into your environment.  If you want to use gpsuite (described later), a file of
+this format is required so it is useful to start using one with getput.  To make
+sure you have set up your credentials correctly, source the file and run the
+command:
 
 swift stat
 
-and you should be presented with some statistics about your object store.  If not,
-you will need to figure out what is wrong with your credentials and get them
-corrected before you can continue.  Debugging authentication is beyond the scope
-of this document.
+and you should be presented with some statistics about your object store.  If
+not, you will need to figure out what is wrong with your credentials and get
+them corrected before you can continue.  Debugging authentication is beyond the
+scope of this document.
 
 RUNNING GETPUT
 --------------
@@ -114,8 +100,8 @@ which will run the test in two parallel threads and like -t you can also repeat
 the tests using a different process count for each.  You can even use multiple
 processes with multiple object sizes, the result of which can be quite a
 number of combinations of tests.  When you do use multiple processes, each
-object includes the process number to assure uniqueness.  See the man page for
-more details on object naming.
+object name includes the process number to assure uniqueness.  See the man page
+for more details on object naming.
 
 Sometimes you may wish to use a new container for each test and it may be
 difficult or annoying to come up with a new, unique name for each test.  Not to
@@ -183,7 +169,7 @@ and it runs gpmulti for you.
 Since you often want to have multiple tests that only vary by one or two test
 parameters, gpsuite allows you to include one stanza's switches in another and
 simply replace those you want to change.  You can 'include' to as many levels
-as you want, but just take case not to introduce any loops as gpsuite does not
+as you want, but just take care not to introduce any loops as gpsuite does not
 check for that.
 
 If you have a look at /etc/gpsuite.d/gpsuite.conf you'll see an example suite
@@ -201,7 +187,7 @@ But before you can run your first gpsuite command, you need to make sure your
 credentials files is set up correctly AND copied to the home directory you will
 be using on each remote node.  You will also have to installed python-swiftclient
 on all the nodes as well as placed a copy of getput in that same home directory.
-And don't forget to make sure getput does work as expected on each node.  Finally
+And don't forget to make sure getput does work as expected on each node. Finally
 you also need to make sure passwordless ssh is functioning correctly.
 
 Once you've done all that you can now run something like:
@@ -213,8 +199,8 @@ and if it works, you'll see something like this:
 gpsuite --suite st1-1node
 Writing test results to /home/segerm/devtests/st1/20131112-144024-st1-1node.log
 
-and as you can see it tells you the name of the file it's writing its results to,
-which makes it really each to do a tail -f on and watch the test proceeding
+and as you can see it tells you the name of the file it's writing its results
+to, which makes it really each to do a tail -f on and watch the test proceeding
 
 However, when setting up a new test for the first time I'll often find something
 was misconfigured and the test failed.  Since the commands are being executed
@@ -230,17 +216,17 @@ Command: /usr/bin/gpmulti -cst1 -ost1 -s1k -tp,g,d --nodes st1-compute --numnode
 /home/segerm/devtests/s1/20131112-144024-st1-1node.log
 
 so you can inspect the switches to see if they look correct (or simply have run
-gpsuite with the --dry switch).  But more importantly, you can simply cut/paste the
-gpmulti command and execute it manually, making it real each to see any errors it
-may encounter.  But sometimes it may not show any errors in which case you can run that
-command with -d2 and it will show you the ssh command it's running getput with which
-you can also cut/paste/run.  Using this technique you can usually determine what went
-wrong.
+gpsuite with the --dry switch).  But more importantly, you can simply cut/paste
+the gpmulti command and execute it manually, making it real each to see any
+errors it may encounter.  But sometimes it may not show any errors in which case
+you can run that command with -d2 and it will show you the ssh command it's
+running getput with which you can also cut/paste/run.  Using this technique you
+can usually determine what went wrong.
 
-Finally, you may find yourself getting impatient waiting for a long-running test to
-complete when all you want to do is verify your configuration.  For that reason there
-are a few additionaly command line switches to allow you to overring a suite's settings
-and my favorites are:
+Finally, you may find yourself getting impatient waiting for a long-running test
+to complete when all you want to do is verify your configuration.  For that
+reason there are a few additionaly command line switches to allow you to
+override a suite's settings and my favorites are:
 
 --procs 1 --size 1k --runtime 10
 

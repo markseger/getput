@@ -271,7 +271,8 @@ def main(argv):
 
     global debug, options, procset, sizeset, ldist10
     global username, password, authurl, osvars, errmax
-    global latexc_min, latexc_max, latexc_filt, exclog, excopt, sha_size
+    global latexc_min, latexc_max, latexc_filt, exclog, excopt, \
+		 sha_size, obj_max_proc
 
     ldist10 = 0
     procset = [1]
@@ -343,7 +344,7 @@ def main(argv):
                       help="log latencies for all operations",
                       default='0')
     groupc.add_option('--objopts',    dest='objopts', default='',
-                      help='object options [acfru]')
+                      help='object options [acfmru]')
     groupc.add_option('--objoffset',    dest='objoffset', default='0',
                       help='object number offset for flat hierarchies')
     groupc.add_option('--objseed',    dest='objseed', default='0',
@@ -361,6 +362,8 @@ def main(argv):
     groupc.add_option('--quiet',   dest='quiet', default=False,
                       help='suppress api errors & sync time warnings',
                       action='store_true')
+    groupc.add_option('--quiton404', dest='quiton404',
+                      help='exit 404', action='store_true')
     groupc.add_option('--range',   dest='range', default='',
                       help='get object by this range')
     groupc.add_option('--repeat',   dest='repeats',
@@ -447,14 +450,24 @@ def main(argv):
     if not options.cname:
         error('specify container name with -c')
 
+    obj_max_proc = 0    # only set when 'm' option
     if options.objopts:
         # if you include 'r', you can optionally include a length too, so
-        # first remove everything but the 'r'
+        # first remove everything but the 'r', 'm' and digits
         objopts = re.sub('[acfu]*', '', options.objopts)
         if re.search('r', objopts):
             match = re.search('r(\d*)', objopts)
             sha_size = 128 if match.group(1) == ''  else int(match.group(1))
             objopts = re.sub(match.group(0), '', objopts)
+        if re.search('m', objopts):
+	    if options.ctype != 'shared':
+		error("--objopts m only makes sense with shared containers")
+            match = re.search('m(\d*)', objopts)
+            if match.group(1):
+		obj_max_proc = int(match.group(1))
+                objopts = re.sub(match.group(0), '', objopts)
+	    else:
+		error("--objopt requires max procs")
         if objopts != '':
             error("unknown --objopts values: %s" % objopts)
 
@@ -475,8 +488,8 @@ def main(argv):
     #    T e s t    D e p e n d e n t    S w i t c h e s
 
     if options.range != '':
-        if not re.search('g', options.tests):
-            error("--range only applies to 'get' tests")
+        #if not re.search('g', options.tests):
+        #    error("--range only applies to 'get' tests")
         for value in options.range.split(','):
             if not re.match('\d+-\d+$', value):
                 error("range '%s' must be in min-max format" % (value))
@@ -1077,6 +1090,7 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
     logger(3, 'cname: %s  oname: %s  gets: %d  now: %d  done: %d' %
            (cname, oname, maxgets, time.time(), donetime), instance)
 
+    last_size = 0
     while (gets <= maxgets and time.time() < donetime and errs < errmax):
 
         objsize = 0
@@ -1120,7 +1134,13 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
                                                   resp_chunk_size=65536)
             transID = response['headers']['x-trans-id']
 
+
         except ClientException as err:
+	    if err.http_status == 404 and options.quiton404:
+		objsize = last_size
+		gets -= 1
+		break
+
             errs = errs + 1
             if err.http_status == 401:
                 api_error('token expired, retry get', instance, cname, objname, err)
@@ -1157,6 +1177,7 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
                 break
             else:
                 objsize += len(chunk)
+	last_size = objsize
 
         ops = ops + 1
         t2 = time.time()
@@ -1194,7 +1215,7 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
     logger(9, '', instance)
 
     return(['get', instance, elapsed, ops, min, max, \
-                tot, errs, lat_dist, latencies, scpu, retries])
+                tot, errs, lat_dist, latencies, scpu, retries, objsize])
 
 
 def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
@@ -1254,6 +1275,10 @@ def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
             transID = response['headers']['x-trans-id']
 
         except ClientException as err:
+	    if err.http_status == 404 and options.quiton404:
+		dels -= 1
+		break
+
             errs = errs + 1
             if err.http_status == 401:
                 api_error('token expired, retry del', instance, cname, objname, err)
@@ -1476,7 +1501,7 @@ def execute_proc(args):
 
 
 def print_line(procs, instance, ops, rate, iops, min, max, tot, errs,
-               cpu_percent, lat_dist, median, etime, retries, psum_flag=False):
+               cpu_percent, lat_dist, median, etime, retries, xfer, psum_flag=False):
     """
     print a line of results for one process OR total for all, only printing
     process details when --psum set and print_output tells us to do so
@@ -1514,7 +1539,7 @@ def print_line(procs, instance, ops, rate, iops, min, max, tot, errs,
     if options.rank:
         line += "%-4s " % options.rank
     line += "%-4s  %4d %4s %6s  %8s  %8s %8.2f %5d" % \
-        (tname, 1, procs, cvt2KMG(osize), ptime(stime), ptime(etime), \
+        (tname, 1, procs, cvt2KMG(xfer), ptime(stime), ptime(etime), \
              rate, ops)
     line += "%10.2f %4d %s %7.3f %5.2f-%05.2f" % \
         (iops, errs, latency, median, min, max)
@@ -1535,7 +1560,8 @@ def median_calc(list):
     """
 
     list.sort()
-    return(list[len(list) / 2])
+    median = list[len(list)/2] if len(list) else 0
+    return(median)
 
 
 def print_header():
@@ -1608,6 +1634,7 @@ def print_output(results, procs):
     for i in range(11):
         ldist_tot.append(0)
 
+    bytes_read = 0
     errors = 0
     lattot = 0
     latmin = 999
@@ -1616,13 +1643,23 @@ def print_output(results, procs):
     etime = time.time()
     opst = ratet = iopst = retries = 0
     for i in range(procs):
+
+        # get tests report bytes read because if doing byrange, we can get less, so
+        # peal off the end of the results array. Then read standard, fixed results
+	if test == 'g':
+	    bytes_xfer = results[i][-1]
+	    results[i] = results[i][:-1]
+	else:
+	    bytes_xfer = osize
+
         oper, instance, elapsed, ops, min, max, tot, errs, \
             lat_dist, latencies, scpu, retries = results[i]
 
-        # combine all latencies into oen big array
+        # combine all latencies into one big array
         lat_all += latencies
 
-        bytes = ops * osize
+	# either use the object size OR bytes_read for calculation
+        bytes = ops * bytes_xfer
         try:
             rate = bytes / elapsed / 1024 / 1024
             iops = ops / elapsed
@@ -1632,7 +1669,8 @@ def print_output(results, procs):
         if options.psum:
             print_line(instance, instance, ops, rate, iops, min, max,
                        tot, errs, cpu_percent, lat_dist,
-                       median_calc(latencies), etime, retries, True)
+                       median_calc(latencies), etime, retries,
+		       bytes_xfer,  True)
 
         opst += ops
         ratet += rate
@@ -1658,7 +1696,8 @@ def print_output(results, procs):
         median = 0
 
     print_line(procs, instance + 1, opst, ratet, iopst, latmin, latmax,
-               lattot, errors, cpu_percent, ldist_tot, median, etime, retries)
+               lattot, errors, cpu_percent, ldist_tot, median, etime,
+	       retries, bytes_xfer)
 
 
 def control_c_handler(signal, frame):
@@ -1677,7 +1716,7 @@ header_printed = 0
 
 if __name__ == "__main__":
 
-    version = '0.2.6'
+    version = '0.2.7'
     copyright = 'Copyright 2016 Hewlett-Packard Development Company, L.P.'
 
     # Needs to be defined before anything else for error logging
@@ -1963,11 +2002,14 @@ if __name__ == "__main__":
                         # if not doing random or flat object I/O, object
                         # names all start with base-rank-inst
                         oname = options.oname
+			obj_inst = inst
+			if test == 'g' and obj_max_proc != 0:
+			    obj_inst %= obj_max_proc
                         if re.search('u', options.objopts):
                             oname += '-%d' % ttime
                         if not re.match('[PGD]', test) and \
                                 not re.search('f', options.objopts):
-                            oname += "-%s-%d" % (options.rank, inst)
+                            oname += "-%s-%d" % (options.rank, obj_inst)
 
                         if debug & 8:
                             print 'debug: cname %s  oname: %s' % (cname, oname)
