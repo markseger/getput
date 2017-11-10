@@ -120,6 +120,8 @@ def main(argv):
                       help="report latency distributions at this granularity")
     group2.add_option('--logops',   dest='logops',
                       help="pass this to getput as --logops value")
+    group2.add_option('--mixopts',   dest='mixopts',
+                      help="don't print any headers", default='')
     group2.add_option('--nohead',   dest='nohead',
                       help="don't print any headers", action='store_true')
     group2.add_option('--objopts',  dest='objopts', default='',
@@ -190,9 +192,30 @@ def main(argv):
         if not os.path.exists(options.sshkey):
             error("ssh key file doesn't exist")
 
+    if options.numnodes:
+        if not re.match('\d+$', options.numnodes) \
+                and not re.match('\d+:\d+$', options.numnodes):
+            error('--numnodes must be an integer')
+    else:
+        error('--numnodes required')
+
     if options.tests:
-        if not (re.match('[,pgdPGD]+\Z', options.tests)):
-            error("valid tests are any comma separated values of: gpd")
+        put_test_first = False
+        for test in options.tests.split(','):
+            if not re.match('[,pgdPGD]+\Z', test) and not re.match('p\d+g\d+', test):
+                error("valid tests are any comma separated values of: gpd OR pXgY")
+            if test == 'p':
+                put_test_first = True
+            match = re.match('p(\d+)g(\d+)', test)
+            if match:
+                if not put_test_first:
+                    error("mixed workload must be preceeded by 'p' test")
+                tot = int(match.group(1)) + int(match.group(2))
+                for proc in options.procset.split(','):
+                    p = int(proc)
+                    min = p/tot
+                    if (min * tot) != p:
+                        error("--procs %s not even multiple of %s" % (p, test))
     else:
         error('define test list with -t or --tests')
 
@@ -240,15 +263,6 @@ def main(argv):
     if options.ctype:
         if not re.match('shared|bynode|byproc', options.ctype):
             error("invalid ctype, expecting: 'shared|bynode|byproc'")
-
-    if options.numnodes:
-        if not re.match('\d+$', options.numnodes) \
-                and not re.match('\d+:\d+$', options.numnodes):
-            error('--numnodes must be an integer')
-
-    if options.numobjs:
-        if not re.match('\d+$', options.numobjs):
-            error("-n must be an integer")
 
     if options.sync:
         if not re.match('\d+$', options.sync):
@@ -379,6 +393,9 @@ def build_command(synctime, test, size_index, procs, utc, putcount):
     if options.scheme:
         command += " --scheme %s" % options.scheme
 
+    if options.mixopts:
+        command += " --mixopts %s" % options.mixopts
+
     if options.warnexit:
         command += " --warnexit"
 
@@ -418,7 +435,7 @@ def execute(queue, command):
     trimmed = ''
     for line in results.split('\n'):
         # note that if random tests, the get/put/del will be followed by R
-        if re.search('error|warning|debug| getR* | putR* | delR* |PutsPerProc',
+        if re.search('error|warning|debug| getR* | putR* | delR* |PutsPerProc| p\d+\g\d+ | [pg]\d+ ',
                      line, re.IGNORECASE):
             trimmed += "%s\n" % line
         elif debug & 16:
@@ -458,26 +475,26 @@ def print_results(queue, putcount):
     lmax = 0
     mbps = ops = iops = latency = median = items = errs = percent = 0
 
-    lat_dist = []
-    for i in range(11):
-        lat_dist.append(0)
-
     puts_per_proc = []
     for i in remote_nodes:
         puts_per_proc.append(0)
+
+
+    totals = {}
+    ldist_offset = 11 if options.ldist else 0
+    utc_shift = 1 if options.utc else 0
 
     # split line and skip errors (I think)
     # if nothing left when done, THEN it's a serious problem
     status = 1
     for node in remote_nodes:
         results = queue.get()
-
         for line in results.split('\n'):
             if line == '':
                 continue
 
             if debug & 4:
-                print 'Line:', line
+                print '>>>Line:', line
 
             # this will need to evolve, but for now treat any error messages
             # EXCEPT 'API Error' as serious and don't expect any output
@@ -497,80 +514,120 @@ def print_results(queue, putcount):
                     sys.exit()
 
             fields = line.split()
-            if re.match('P', line):
+            if re.match('PutsPerProc', line):
                 puts_per_proc[rank] = line.split()[1]
                 continue
 
             # used as index for puts_pre_proc
             rank = int(fields[0])
 
-            items += 1
+            # normally we only come here to report results for a single test
+            # but in the case of mixed workloads we can have up to 3. So
+            # to hack our way to reporting them in order, prepend a number to
+            # the test name and then remove when printing.
             test = fields[1]
-            osize = fields[4]
-            stime = fields[5]
-            etime = fields[6]
+            if re.match('p\d+\g\d+', test):
+                test = '3' + test
+            elif re.match('p\d+', test):
+                test = '1' + test
+            elif re.match('g\d+', test):
+                test = '2' + test
 
-            mbps += float(fields[7])
-            ops += float(fields[8])
-            iops += float(fields[9])
-            errs += int(fields[10])
-            latency += float(fields[11])
-            median += float(fields[12])
+            if test not in totals:
+                totals[test] = {}
+                totals[test]['procs'] = 0
+                totals[test]['items'] = 0
+                totals[test]['mbps'] = 0
+                totals[test]['ops'] = 0
+                totals[test]['iops'] = 0
+                totals[test]['errs'] = 0
+                totals[test]['latency'] = 0
+                totals[test]['median'] = 0
+                totals[test]['percent'] = 0
+                totals[test]['retries'] = 0
+                totals[test]['lmin'] = 999999
+                totals[test]['lmax'] = 0
+
+                totals[test]['ldist'] = []
+                for i in range(11):
+                    totals[test]['ldist'].append(0)
+
+            totals[test]['items'] += 1
+            totals[test]['procs'] += int(fields[3])
+            totals[test]['osize'] = fields[4]
+            totals[test]['stime'] = fields[5]
+            totals[test]['etime'] = fields[6]
+            totals[test]['mbps'] += float(fields[7])
+            totals[test]['ops'] += float(fields[8])
+            totals[test]['iops'] += float(fields[9])
+            totals[test]['errs'] += int(fields[10])
+            totals[test]['latency'] += float(fields[11])
+            totals[test]['median'] += float(fields[12])
+            totals[test]['percent'] += float(fields[ldist_offset + 14])
+            totals[test]['retries'] += int(fields[15 + ldist_offset + utc_shift ])
 
             # min/max latency
             n, x = fields[13].split('-')
-            if float(n) < lmin:
-                lmin = float(n)
+            if float(n) < totals[test]['lmin']:
+                totals[test]['lmin'] = float(n)
             if float(x) > lmax:
-                lmax = float(x)
+                totals[test]['lmax'] = float(x)
             if debug & 8:
-                print "min: %s max: %s" % (min, max)
+                print "min: %s max: %s" % (totals[test]['min'], totals[test]['max'])
 
-            ldist_offset = 0
             if options.ldist:
-                ldist_offset = 11
                 for i in range(11):
-                    lat_dist[i] = lat_dist[i] + int(fields[i + 14])
-
-            percent = percent + float(fields[ldist_offset + 14])
+                    totals[test]['ldist'][i] += int(fields[i + 14])
 
             # only the first put test returns a utc at the end since the
             # other tests are run w/o --utc.  if not running with --utc
             # we don't even care!
-            utc_shift = 0
             if options.utc:
                 if test == 'put' and putcount == 1:
                     utcstamp = fields[ldist_offset + 15]     # no more compress
-                    utc_shift = 1
                 else:
                     utcstamp = utc
             else:
                 utcstamp = ''
+            totals[test]['utcstamp'] = utcstamp
 
-            retries = int(fields[ldist_offset + utc_shift + 15])
+    for test in sorted(totals):
 
-    try:
-        out = "%-5s  %4d  %4d  %5s" % \
-            (test, numnodes, numnodes * procs, osize)
-        out += "  %8s  %8s  %8.2f %6d %8.2f %4d %7.3f %7.3f %5.2f-%05.2f" % \
-            (stime, etime, mbps, ops, iops, errs, latency / items,
-             median / numnodes, lmin, lmax)
-        if options.ldist:
-            for i in range(11):
-                out += " %5d" % lat_dist[i]
-        #out += "   %5.2f %s %3d" % (percent / items, utcstamp, retries)
-        out += "   %5.2f"  % (percent / items)
-        if options.utc:
-            out += ' %s' % utcstamp
-        out += ' %3d' % retries
+        # in case test name has a leading number (mixed w/l), remove it
+        # for printing
+        tname = re.sub('^\d+', '', test)
 
-        if options.csv:
-            out = re.sub('\s+', ',', out)
-            out = re.sub(',$', '', out)
-        print out
-    except UnboundLocalError, err:
-        print "Error printing output:", err
-        utcstamp = int(time.time())
+        lmin = totals[test]['lmin']
+        lmax = totals[test]['lmax']
+
+        try:
+            out = "%-5s  %4d  %4d  %5s" % \
+                  (tname, numnodes, totals[test]['procs'], totals[test]['osize'])
+            out += "  %8s  %8s  %8.2f %6d %8.2f %4d %7.3f %7.3f %5.2f-%05.2f" % \
+                   (totals[test]['stime'], 
+                    totals[test]['etime'],
+                    totals[test]['mbps'],
+                    totals[test]['ops'],
+                    totals[test]['iops'],
+                    totals[test]['errs'],
+                    totals[test]['latency'] / totals[test]['items'],
+                    totals[test]['median'] / numnodes, lmin, lmax)
+            if options.ldist:
+                for i in range(11):
+                    out += " %5d" % totals[test]['ldist'][i]
+                #out += "   %5.2f %s %3d" % (percent / totals[test]['items'], utcstamp, retries)
+            out += "   %5.2f"  % (totals[test]['percent'] / totals[test]['items'])
+            if options.utc:
+                out += ' %s' % totals[test]['utcstamp']
+            out += ' %3d' % totals[test]['retries']
+
+            if options.csv:
+                out = re.sub('\s+', ',', out)
+                out = re.sub(',$', '', out)
+            print out
+        except UnboundLocalError, err:
+            print "Error printing output:", err
+            utcstamp = int(time.time())
 
     return((status, puts_per_proc, utcstamp))
 
@@ -598,7 +655,7 @@ def delcont(cname):
 
 if __name__ == "__main__":
 
-    version = '0.2.2'
+    version = '0.3.0'
     copyright = 'Copyright 2016 Hewlett-Packard Development Company, L.P.'
 
     main(sys.argv[1:])
@@ -662,6 +719,8 @@ for procs in procset:
         putcount = 0
         for test in options.tests.split(','):
 
+            mixed_test = False if not re.match('p\d+', test) else True
+
             if options.pretest:
                 errlog = '/tmp/gpmulti-pretest-%s-%d.err' % (test, time.time())
                 command = '%s %s 2>%s' % (options.pretest, test, errlog)
@@ -699,10 +758,12 @@ for procs in procset:
             jobs = []
             for rank in range(len(remote_nodes)):
 
-                # if there's a 'p' test, use -n OR 99999 noting IT will return
-                # the number of objects actually written. On the other hand if
-                # there is no PUT test we need -n or 99999 anyways
-                if test == 'p' or not re.search('p', options.tests):
+                # For a PUT, we always use the number of objects specified
+                # by -n or something real big if not specified. If ppp[] is
+                # empty it means we weren't preceded by a PUT either (in which
+                # case we could get the numbers from ppp[] which contains the
+                # numbers of objects per process)
+                if test == 'p' or len(ppp) == 0:
                     if options.numobjs:
                         nobjects = options.numobjs
                     else:
