@@ -73,9 +73,23 @@ def main(argv):
         test = fields[0 + gpshift]
 
         # gotta do test this way because strings could be in gpsuite headers
-        if test == 'put' or test == 'get' or test == 'del':
-            if test not in tests:
-                tests[test] = ''
+        if test == 'put' or test == 'get' or test == 'del' or re.match('[pg]\d+', test):
+            if test == 'put':
+                tname = '1' + test
+            elif test == 'get':
+                tname = '2' + test
+            elif test == 'del':
+                tname = '3' + test
+            elif re.match('p\d+g\d+', test):
+                tname = '4' + test
+            elif re.match('p\d+', test):
+                tname = '5' + test
+            elif re.match('g\d+', test):
+                tname = '6' + test
+
+            if tname not in tests:
+                tests[tname] = ''
+
             clients = int(fields[1 + gpshift])
             procs = int(fields[2 + gpshift])
             osize = fields[3 + gpshift].lower()
@@ -85,7 +99,7 @@ def main(argv):
 
             threads = procs
             
-            key = '%s-%04d-%s' % (test, threads, osize)
+            key = '%s-%04d-%s' % (tname, threads, osize)
             if not key in data:
                 data[key]={}
 
@@ -117,9 +131,10 @@ def main(argv):
         col_type = 'range'
 
     if options.vertical:
-        for test in ('put', 'get', 'del'):
-            if test not in tests:
+        for tname in sorted(tests):
+            if tname not in tests:
                 continue
+            test = tname[1:]
 
             # headers
             print "Test: %s  %s" % (test, col_name)
@@ -135,7 +150,7 @@ def main(argv):
                 print '%4d %3s %3d ' % (int(procs), clients, int(procs) / int(clients)),
 
                 for osize in sorted(obj_sizes):
-                    key = '%s-%04s-%s' % (test, threads, osize)
+                    key = '%s-%04s-%s' % (tname, threads, osize)
 
                     try:
                         value = data[key][col_type]
@@ -150,17 +165,21 @@ def main(argv):
         # headers
         data_width = 9 * len(obj_sizes)
         line = '*** %-4s ***' % col_name
-        for test in ('put', 'get', 'del'):
-            if test not in tests:
+        for tname in sorted(tests):
+            if tname not in tests:
                 continue
+            test = tname[1:]
+
             line += ' '
             line += '{type:{width}}'.format(type='    *** %s ***' % test, width=data_width)
         print line
 
         line = '%4s %3s %3s ' % ('Totl', 'Clt', 'Prc')
-        for test in ('put', 'get', 'del'):
-            if test not in tests:
+        for tname in sorted(tests):
+            if tname not in tests:
                 continue
+            test = tname[1:]
+
             line += ' '
             for osize in sorted(obj_sizes):
                 size = str(int(osize[1:])) + osize[0]
@@ -172,12 +191,14 @@ def main(argv):
             clients, procs = num_threads[threads].split('-')
             line = '%4d %3s %3d ' % (int(procs), clients, int(procs) / int(clients))
 
-            for test in ('put', 'get', 'del'):
-                if test not in tests:
+            for tname in sorted(tests):
+                if tname not in tests:
                     continue
+                test = tname[1:]
+
                 line += ' '
                 for osize in sorted(obj_sizes):
-                    key = '%s-%04s-%s' % (test, threads, osize)
+                    key = '%s-%04s-%s' % (tname, threads, osize)
                     try:
                         value = data[key][col_type]
                     except KeyError:
