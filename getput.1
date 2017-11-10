@@ -169,21 +169,47 @@ of 64K on a 1M object, you see see a size of 64K. BUT since multiple ranged
 GETs actually including formatting to separate the pieces returned you will get
 more than 128K returned and it is this number that is reported.
 
+.SH MIXED TESTS
+
+As of Version 0.3, getput now supports mixed workload testing. Currently when
+you request a PUT or GET test and a number of procs, each process runs one test
+or the other. Now you can specify a mixed workload by selecting a test such as
+p3g2 and as a result, for every 3 threads running PUT tests, 2 will run GET
+tests resulting in a 60%:40% mix. You can specify any values for the PUTs and
+the GETs as long at the number(s) specified by --procs are an even multiple of
+their combined total.
+
+There is one other restriction and that is since the PUTs and GETs run at
+different rates, it's impossible to do GETs on objects that may not yet exist.
+To assure the tests all run at full speed it is therefore required to prepopulate
+the container with objects before runnning the mixed workload, like this: -tp,p3g2.
+Even though the first PUT will generate a full set of objects that may not all be
+read by the g3, that's ok. One thing to keep in mind is in the case of a timed
+test, the number of PUTs are based on the time duration of the test and the
+number of GETs are based on those created by the initial PUT test.
+
+As with non-mixed workloads, you can specify as many tests as you want separated
+by commas, the only restriction is you must have a single p test preceding any
+mixed tests. Alternatively, and primarily as a testing mechanism, you can run a
+standard PUT test, report the number of PUTs/process via --puts_per_proc and then
+run a mixed test omitting the leading PUT test but incuding the object-to-process
+mapping via -n so the mixed tests can find all the pre-existing objects.
+
+The results of mixed tests will use the name of the test specified as the test
+name in the output to make it easy to differentiate from other tests and the
+numbers will be the combination of the results of the PUTs and GETs. If you also
+include --mixopts m, the output will be preceded with 2 lines, one for the PUT
+tests and one for the GETs, named in the form of pX and gY. Though really intended
+more for debugging, if you specify --psum, you'll see an output line for every
+thread in addition to the totals, which may provide further insight into how
+the totals are generated.
+
 .SH AUTHENTICATION
 
 You must have valid credentials to access swift and they may be specified in
 the environment variables the same way one would specify them for using the
-swift client utility OR simply create a file that can be sourced.  One can
-choose to use the ST_ style of variables OR the OS_ style,  defining them
-as lines consisting of:
-
-export ST_AUTH=authentication end point
-.br
-export ST_USER=username
-.br
-export ST_KEY=password
-
-OR
+swift client utility OR simply create a file that can be sourced.  Define
+them as lines consisting of:
 
 export OS_AUTH_URL=authentication end point
 .br
@@ -395,6 +421,14 @@ of each operation, the latency and container/object names.
 One can also change the behavior of logging to include more details about test
 start/stop times and optionally exclude the detailed operational data by using
 --debug.
+.RE
+
+.B --mixopts
+.RS
+There is currently one option for mixed tests and this is m, which when present
+with result in 2 extra summary lines being printed ahead of the totals for the
+test. The first will contain a summary of the PUT tests adn the next the for
+the GET tests.
 .RE
 
 .B --objopts
