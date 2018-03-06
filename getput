@@ -831,7 +831,7 @@ def api_error(type, instance, cname, oname, err, response=None):
 	if response:
 	    error_string += ' TransID: %s' % response['headers']['x-trans-id']
     except KeyError:
-	none
+	pass
     error_string += ' %s/%s' % (cname, oname)
 
     if not options.quiet:
