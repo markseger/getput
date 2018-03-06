@@ -378,6 +378,8 @@ def main(argv):
                       help='authurl connection scheme, http|https')
     groupc.add_option('--warnexit', dest='warnexit',
                       help='exit on warnings', action='store_true')
+    groupc.add_option('--retry-on-ratelimit', dest='retry_on_ratelimit',
+                      help='Let swift client retry on ratelimit hit', action='store_true')
     parser.add_option_group(groupc)
 
     groupb = OptionGroup(parser, 'multi-node access')
@@ -712,7 +714,6 @@ def connect(authurl, username, password, osvars, \
             (insecure, cacert)
         print "Connect - PreauthURL: %s PreauthToken: %s" % \
             (preauthurl, preauthtoken)
-
     # get the connection object
     if preauthurl:
         logexec('connect - PreauthURL: %s  PreauthToken: %s' % \
@@ -730,7 +731,8 @@ def connect(authurl, username, password, osvars, \
                              preauthtoken=preauthtoken,
                              insecure=insecure,
                              cacert=cacert,
-                             os_options=os_options)
+                             os_options=os_options,
+                             retry_on_ratelimit=options.retry_on_ratelimit)
         else:
             connection = \
                 MyConnection(authurl=authurl,
@@ -741,7 +743,8 @@ def connect(authurl, username, password, osvars, \
                              preauthtoken=preauthtoken,
                              insecure=insecure,
                              cacert=cacert,
-                             os_options=os_options)
+                             os_options=os_options,
+                             retry_on_ratelimit=options.retry_on_ratelimit)
     except Exception as err:
         import traceback
         print "Connect failure: %s" % err
