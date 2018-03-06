@@ -372,15 +372,15 @@ def main(argv):
                       help='number of time to repeat --num tests')
     groupc.add_option('--retries',  dest='retries', default='5',
                       help='number of time to retry failed test')
+    groupc.add_option('--retry-on-ratelimit', dest='retry_on_ratelimit',
+                      help='Let swift client retry on ratelimit hit', action='store_true')
     groupc.add_option('--sleeps',   dest='sleeps',
                       help='times to sleep at various test points')
     groupc.add_option('--scheme',   dest='scheme', default='',
                       help='authurl connection scheme, http|https')
     groupc.add_option('--warnexit', dest='warnexit',
                       help='exit on warnings', action='store_true')
-    groupc.add_option('--retry-on-ratelimit', dest='retry_on_ratelimit',
-                      help='Let swift client retry on ratelimit hit', action='store_true')
-    parser.add_option_group(groupc)
+    groupc.add_option_group(groupc)
 
     groupb = OptionGroup(parser, 'multi-node access')
     groupb.add_option('--creds',    dest='creds',
@@ -1795,7 +1795,7 @@ header_printed = 0
 
 if __name__ == "__main__":
 
-    version = '0.3.0'
+    version = '0.3.1'
     copyright = 'Copyright 2016 Hewlett-Packard Development Company, L.P.'
 
     # Needs to be defined before anything else for error logging

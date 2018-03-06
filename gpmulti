@@ -143,6 +143,8 @@ def main(argv):
                       help='suppress api errors & sync time warnings',
                       action='store_true')
     group2.add_option('--range',  dest='range', help="range")
+    group2.add_option('--retry-on-ratelimit', dest='retry_on_ratelimit',
+                      help='Let swift client retry on ratelimit hit', action='store_true')
     group2.add_option('--runtime',  dest='runtime',
                       help="runtime in secs")
     group2.add_option('--scheme',  dest='scheme',
@@ -386,6 +388,9 @@ def build_command(synctime, test, size_index, procs, utc, putcount):
 
     if options.range:
         command += " --range %s" % options.range
+
+    if options.retry_on_ratelimit:
+        command += " --retry_on_ratelimit"
 
     if options.runtime:
         command += " --runtime %d" % runtime

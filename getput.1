@@ -553,6 +553,14 @@ If you are running getputs on multiple nodes and do not at least have 1 running 
 rank of 0, all GETs will fail with a 404.
 .RE
 
+.B --retry-on-ratelimit
+.RS
+In cases swift is doing rate limiting (response code 498) a client
+should react with an exponential backoff. This is already implemented
+in swiftclient but has to be activated during creation of the
+connection pool.
+.RE
+
 .B --scheme [http|https][:[address]]
 .RS
 After getput is authenticated, a url is returned which is then used for future

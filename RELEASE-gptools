@@ -15,6 +15,9 @@ GPMULTI
   - remove ropts
 
 GETPUT
+0.3.1  Mar 06, 2018
+  - add --retry-on-ratelimit [thanks marc]
+
 0.2.6.7
   - new options to support random/range operations
     - --quiton404 for when you try to read/del an object beyond those written
