@@ -380,7 +380,7 @@ def main(argv):
                       help='authurl connection scheme, http|https')
     groupc.add_option('--warnexit', dest='warnexit',
                       help='exit on warnings', action='store_true')
-    groupc.add_option_group(groupc)
+    parser.add_option_group(groupc)
 
     groupb = OptionGroup(parser, 'multi-node access')
     groupb.add_option('--creds',    dest='creds',
@@ -1795,7 +1795,7 @@ header_printed = 0
 
 if __name__ == "__main__":
 
-    version = '0.3.1'
+    version = '0.3.2'
     copyright = 'Copyright 2016 Hewlett-Packard Development Company, L.P.'
 
     # Needs to be defined before anything else for error logging
