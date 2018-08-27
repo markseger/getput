@@ -15,6 +15,17 @@ GPMULTI
   - remove ropts
 
 GETPUT
+0.3.2  Aug 16, 2018
+  - new switch: --s3, use s3/boto api, also needs s3 credentials
+  - now --psum reports actual start/stop times for all threads
+    [thanks mark for this and thsoe that follow]
+  - added code to make sure all threads connect before moving on
+  - better accuracy in starting times and thread completion
+  - when sync time does pass, only report message for thread 0 since
+    all now start at same time so if one fails they all will/should
+  - increased donetime by non-puts to 5X from 2X since at least on
+    ceph, gets can be a lot slower than puts so they need more time
+
 0.3.1  Mar 06, 2018
   - add --retry-on-ratelimit [thanks marc]
 

@@ -18,7 +18,7 @@
 
 # debug
 #    1 - print some basic stuff. inclucing test starts info
-#    2 - show cont/obj names on calls
+#    2 - show more details about process startup/shutdown
 #    4 - report container header info
 #    8 - show name of container being used
 #   16 - show inputs for starting multiprocessing
@@ -50,11 +50,16 @@ import md5
 import hashlib
 from random import randint
 from optparse import OptionParser, OptionGroup
-from multiprocessing import Pool
+from multiprocessing import Pool, Value
 from urlparse import urlparse
 from swiftclient import Connection
 from swiftclient import ClientException
 from swiftclient import put_object
+
+# This is for process synchronization and warning/error threshold secs
+counter = None
+threshold_conn = 5
+threshold_hang = 300 
 
 
 # Handy for tracing execution of getput itself
@@ -206,6 +211,13 @@ def parse_creds(creds_file=None):
         if osvars[varname] != '':
             osnum += 1
 
+    rgwnum = 0
+    rgwvars = {}
+    for varname in ['RGW_ACCESS_ID', 'RGW_SECRET_KEY', 'RGW_HOST', 'RGW_PORT']:
+        rgwvars[varname] = getenv(varname)
+        if rgwvars[varname] != '':
+            rgwnum += 1
+
     if creds_file:
         try:
             f = open(creds_file, 'r')
@@ -213,8 +225,7 @@ def parse_creds(creds_file=None):
                 if re.match('\#|\s*$', line):
                     continue
                 line = line.rstrip('\n')
-
-                search = re.search('(ST|OS|SWIFTCLIENT)_(.*)=(.*)', line)
+                search = re.search('(ST|OS|RGW|SWIFTCLIENT)_(.*)=(.*)', line)
                 if search:
                     value = search.group(3).strip(";'\"")
                     if search.group(1) == 'ST':
@@ -223,6 +234,9 @@ def parse_creds(creds_file=None):
                     elif search.group(1) == 'OS':
                         osvars["OS_" + search.group(2)] = value
                         osnum += 1
+                    elif search.group(1) == 'RGW':
+                        rgwvars["RGW_" + search.group(2)] = value
+                        rgwnum += 1
                     elif search.group(1) == 'SWIFTCLIENT':
                         osvars["SWIFTCLIENT_" + search.group(2)] = value
                         osnum += 1
@@ -230,46 +244,57 @@ def parse_creds(creds_file=None):
         except IOError, err:
             error("Couldn't read creds file: " + creds_file)
 
-    if stnum > 0 and  osnum > 0:
-        error('you have both ST_ and OS_style varibles defined' + \
+    if not s3:
+        if stnum > 0 and  osnum > 0:
+            error('you have both ST_ and OS_style varibles defined' + \
                   ' in your environment and you must only have 1 type')
-    if stnum > 0 and stnum != 3:
-        error('you have at least 1 ST_ style variable defined but not all 3')
-    if osnum > 0:
-        if osvars['OS_AUTH_URL'] == '' or osvars['OS_USERNAME'] == '' \
+        if stnum > 0 and stnum != 3:
+            error('you have at least 1 ST_ style variable defined but not all 3')
+        if osnum > 0:
+            if osvars['OS_AUTH_URL'] == '' or osvars['OS_USERNAME'] == '' \
                                        or osvars['OS_PASSWORD'] == '':
-            error('your environment has at least 1 OS_ style variable ' + \
-                  'defined but not OS_AUTH_URL, OS_USERNAME or OS_PASSWORD')
-        if osvars['OS_TENANT_NAME'] == '' and osvars['OS_TENANT_ID'] == '' \
+                error('your environment has at least 1 OS_ style variable ' + \
+                      'defined but not OS_AUTH_URL, OS_USERNAME or OS_PASSWORD')
+            if osvars['OS_TENANT_NAME'] == '' and osvars['OS_TENANT_ID'] == '' \
                                           and osvars['OS_PROJECT_NAME'] == ''\
                                           and osvars['OS_PROJECT_ID'] == '':
-            error('your environment has at least 1 OS_ style variable ' + \
-                  'defined but not OS_TENANT_NAME, OS_TENANT_ID or ' + \
-                  'OS_PROJECT_NAME, OS_PROJECT_ID')
+                error('your environment has at least 1 OS_ style variable ' + \
+                      'defined but not OS_TENANT_NAME, OS_TENANT_ID or ' + \
+                      'OS_PROJECT_NAME, OS_PROJECT_ID')
 
-    username = password = authurl = ''
+        username = password = authurl = ''
 
-    if stnum > 1:
-        authurl = stvars['ST_AUTH']
-        username = stvars['ST_USER']
-        password = stvars['ST_KEY']
-    elif osnum > 1:
-        authurl = osvars['OS_AUTH_URL']
-        del osvars['OS_AUTH_URL']
-        username = osvars['OS_USERNAME']
-        del osvars['OS_USERNAME']
-        password = osvars['OS_PASSWORD']
-        del osvars['OS_PASSWORD']
+        if stnum > 1:
+            authurl = stvars['ST_AUTH']
+            username = stvars['ST_USER']
+            password = stvars['ST_KEY']
+        elif osnum > 1:
+            authurl = osvars['OS_AUTH_URL']
+            del osvars['OS_AUTH_URL']
+            username = osvars['OS_USERNAME']
+            del osvars['OS_USERNAME']
+            password = osvars['OS_PASSWORD']
+            del osvars['OS_PASSWORD']
 
-    return((authurl, username, password, osvars))
+        return((authurl, username, password, osvars))
 
+    # I hate multiple returns, but given the way this is called it makes things lot easier
+    else:
+        rgw_access_id = rgwvars['RGW_ACCESS_ID']
+        rgw_secret_key = rgwvars['RGW_SECRET_KEY']
+        rgw_host = rgwvars['RGW_HOST']
+        rgw_port = rgwvars['RGW_PORT']
+        if rgw_access_id == ''  or rgw_secret_key == '' or rgw_host == '' or  rgw_port == '':
+	    error("not all 4 s3 access variables specified with --creds or found in environment")
+
+        return((rgw_access_id, rgw_secret_key, rgw_host, rgw_port))
 
 def main(argv):
     """
     read/parse switches
     """
 
-    global debug, options, procset, sizeset, ldist10
+    global debug, options, procset, sizeset, ldist10, s3
     global username, password, authurl, osvars, errmax
     global latexc_min, latexc_max, latexc_filt, exclog, excopt, \
 		 sha_size, obj_max_proc, put_test, put_test_first
@@ -376,6 +401,8 @@ def main(argv):
                       help='Let swift client retry on ratelimit hit', action='store_true')
     groupc.add_option('--sleeps',   dest='sleeps',
                       help='times to sleep at various test points')
+    groupc.add_option('--s3', dest='s3', action='store_true',
+                      help='use s3 api')
     groupc.add_option('--scheme',   dest='scheme', default='',
                       help='authurl connection scheme, http|https')
     groupc.add_option('--warnexit', dest='warnexit',
@@ -409,6 +436,13 @@ def main(argv):
         print 'getput V%s\n\n%s' % (version, copyright)
         sys.exit()
 
+    s3 = options.s3
+    if s3:
+        global boto
+
+	import boto
+        import boto.s3.connection
+
     # we have to do before printheader() in case we want
     # to include latency historgram headers
     if options.ldist:
@@ -423,11 +457,20 @@ def main(argv):
         print_header()
         sys.exit()
 
-    #    T h e s e    h a v e    d e f a u l t s
+    #    G e t    C r e d e n t i a l s    f r o m    E n v    o r    C r e d s    F i l e
 
-    #    G e t    C r e d e n t i a l s    f r o m    C r e d s    F i l e
+    if not s3:
+        (authurl, username, password, osvars) = parse_creds(options.creds)
+        if username == '' or password == '' or authurl == '':
+            error('specify credentials with --creds OR set ST_* variables')
+    else:
+	(rgw_access_id, rgw_secret_key, rgw_host, rgw_port) = parse_creds(options.creds)
 
-    (authurl, username, password, osvars) = parse_creds(options.creds)
+        # big time hack to make easier to constently call connect()
+        username = rgw_access_id
+        password = rgw_secret_key
+        authurl = rgw_host + ':' + rgw_port
+        osvars = {}
 
     try:
         debug = int(options.debug)
@@ -440,9 +483,6 @@ def main(argv):
         error('--errmax must be an integer')
 
     #     R e q u i r e d :   - - t e s t s    &    - - c n a m e
-
-    if username == '' or password == '' or authurl == '':
-        error('specify credentials with --creds OR set ST_* variables')
 
     # note -- mixed_test means one of possibly multiple tests is mixed but we
     # don't know which one(s). We also need to know if there was a pure PUT
@@ -663,8 +703,37 @@ if not hasattr(Connection, 'close'):
 def connect(authurl, username, password, osvars, \
                 preauthurl=None, preauthtoken=None):
     """
-    make a connection to swift
+    make a connection using swift or s3 api
     """
+
+    if s3:
+        s3_access_key = username
+        s3_secret_key = password    
+        s3_host, s3_port = authurl.split(':')
+        s3_port = int(s3_port)
+
+        if debug & 64:
+            print "Connect - Access: %s Secret: %s Host: %s Port: %s" % \
+                (s3_access_key, s3_secret_key, s3_host, s3_port)
+
+	try:
+            connection = boto.connect_s3(
+            aws_access_key_id = s3_access_key,
+            aws_secret_access_key = s3_secret_key,
+            host = s3_host,
+            #is_secure=False,               # uncomment if you are not using ssl
+            calling_format = boto.s3.connection.OrdinaryCallingFormat(),
+            port=s3_port,
+            )
+        except Exception as err:
+            import traceback
+            print "Connect failure: %s" % err
+            logexec('connect() exception: %s %s' % (err, traceback.format_exc()))
+            return(-1)
+
+	if debug & 64:
+            print "Connected to S3", connection
+        return(connection)
 
     if osvars['OS_AUTH_VERSION'] != '':
         auth_version = osvars['OS_AUTH_VERSION']
@@ -758,7 +827,7 @@ def connect(authurl, username, password, osvars, \
         headers = connection.head_account()
     except Exception as err:
         import traceback
-        print "head_account failure: %s" % err
+        print "%s head_account failure: %s" % (ptime(time.time()), err)
         logexec('head_account() exception: %s %s' % \
                     (err, traceback.format_exc()))
 
@@ -829,17 +898,24 @@ def api_error(type, instance, cname, oname, err, response=None):
     """
 
     time_now = time.strftime('%H:%M:%S')
-    error_string = '%s %s API Error %d' % (time_now, type, err.http_status)
-    try:
-	if response:
-	    error_string += ' TransID: %s' % response['headers']['x-trans-id']
-    except KeyError:
-	pass
-    error_string += ' %s/%s' % (cname, oname)
+
+    if not s3:
+        status = err.http_status
+        error_string = '%s %s API Error %d' % (time_now, type, status)
+        try:
+	    if response:
+	        error_string += ' TransID: %s' % response['headers']['x-trans-id']
+        except KeyError:
+	    pass
+        error_string += ' %s/%s' % (cname, oname)
+
+    else:
+        status = err.status
+        error_string = '%s %s API Error %d' % (time_now, type, status)
 
     if not options.quiet:
         print error_string
-    logger(4, 'ApiError: %s ' % err.http_status, instance)
+    logger(4, 'ApiError: %s ' % status, instance)
 
 
 def latcalc(latency, min, max, tot, dist):
@@ -872,6 +948,9 @@ def reset_url(url, new_address=None):
     reset url's scheme and port based on --scheme
     and optional addresss
     """
+
+    if s3:
+	return('')
 
     # parse url's scheme, addr, port and path
     new_url = url
@@ -978,6 +1057,11 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
         debug_width = int(fields[2]) if len(fields)>2 else 1
 
     fp = cStringIO.StringIO(fixed_object)
+
+    if s3:
+	bucket = connection.get_bucket(cname)
+        bucket_key = boto.s3.key.Key(bucket)
+
     while (puts <= maxputs and time.time() < donetime and errs < errmax):
 
         # build object name based on object type and number
@@ -997,57 +1081,68 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
         puts = puts + 1
         t1 = time.time()
         fp.seek(0)
-        try:
-            response = {}
-            logexec("Call PUT")
-            headers = {}
-            if options.headers:
-                headers['X-Debug-Mask'] = '%s%0*s:%s' % (debug_tag, debug_width, object_number, debug_mask)
-            if options.extra:
-                headers['X-Trans-Id-Extra'] = options.extra
+        response = {}
+        logexec("Call PUT")
+        headers = {}
+        if options.headers:
+            headers['X-Debug-Mask'] = '%s%0*s:%s' % (debug_tag, debug_width, object_number, debug_mask)
+        if options.extra:
+            headers['X-Trans-Id-Extra'] = options.extra
 
-            if debug & 2:
-                print "%s PUT CName: %s  OName: %s Inst: %d" % \
-                    (time.strftime('%H:%M:%S'), cname, objname, instance)
-
-            connection.put_object(cname, objname, fp, osize,
+        t1 = time.time()
+        if not s3:
+            try:
+                connection.put_object(cname, objname, fp, osize,
                                   response_dict=response,
                                   headers=headers)
-            logexec("PUT succeeded")
-            transID = response['headers']['x-trans-id']
-            md5check('put', cname, objname, response, md5_digest)
+                logexec("PUT succeeded")
+                transID = response['headers']['x-trans-id']
+                md5check('put', cname, objname, response, md5_digest)
 
-        except ClientException as err:
-            # I expect this to be very rare so if token expired just
-            # get new token, reconnect and retry, treating like any other errors
-            errs = errs + 1
-            if err.http_status == 401:
-                api_error('token expired, retry put', instance, cname, objname, err)
-                puts -= 1
+            except ClientException as err:
+                # I expect this to be very rare so if token expired just
+                # get new token, reconnect and retry, treating like any other errors
+                errs = errs + 1
+                if err.http_status == 401:
+                    api_error('token expired, retry put', instance, cname, objname, err)
+                    puts -= 1
                 
-                connection = connect(authurl, username, password, osvars, \
+                    connection = connect(authurl, username, password, osvars, \
                                          preauthurl, preauthtoken)
-                if connection == -1:
-                    error('Error: ClientException connect error')
-                preauthtoken = connection.token
+                    if connection == -1:
+                        error('Error: ClientException connect error')
+                    preauthtoken = connection.token
 
-                connection = connect(authurl, username, password, osvars, \
+                    connection = connect(authurl, username, password, osvars, \
                                          preauthurl, preauthtoken)
-            else:
-                api_error('put', instance, cname, objname, err, response)
-            continue
+                else:
+                    api_error('put', instance, cname, objname, err, response)
+                continue
 
-        # this has been a lot of pain, but if we do get a traceback this is the
-        # best way I could think of to both record it locally in the exec.log
-        # and pass it back to gpmulti if called that way.
-        except Exception as err:
-            import traceback
-            logexec('put_object() exception: %s %s' % \
+            # this has been a lot of pain, but if we do get a traceback this is the
+            # best way I could think of to both record it locally in the exec.log
+            # and pass it back to gpmulti if called that way.
+            except Exception as err:
+                import traceback
+                logexec('put_object() exception: %s %s' % \
                         (err, traceback.format_exc()))
-            logger(9, '', instance)
-            return(['Unexpected Error - put_object() exception: %s' % \
-                        err, instance, 0, 0, 0, 0, 0, 0,
-                        lat_dist, latencies, scpu, 0])
+                logger(9, '', instance)
+                return(['%s Unexpected Error - put_object() exception: %s' % \
+                        (ptime(time.time()), err), instance, 0, 0, 0, 0, 0, 0,
+                        lat_dist, latencies, scpu, 0, 0, 0])
+        else:
+            try:
+                bucket_key.key = objname
+                bucket_key.set_contents_from_string(fixed_object)
+                transID = ''
+            except Exception as err:
+                import traceback
+                logexec('s3.set_contents_from_string() exception: %s %s' % \
+                        (err, traceback.format_exc()))
+                logger(9, '', instance)
+                return(['%s Unexpected Error - set_contents_from_string() exception: %s' % \
+                        (ptime(time.time()), err), instance, 0, 0, 0, 0, 0, 0,
+                        lat_dist, latencies, scpu, 0, 0, 0])
 
         ops = ops + 1
         t2 = time.time()
@@ -1055,11 +1150,12 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
         min, max, tot = latcalc(latency, min, max, tot, lat_dist)
         latencies.append(latency)
 
-        tries = connection.attempts
+        # we subtract 1 from tries so it keeps retries 0 for s3
+        tries = connection.attempts if not s3 else 1 
         retries += tries - 1
         if debug & 32:
-            print "PUT %f  %f  TransID: %s Latency: %9.6f Tries: %d %s/%s" % \
-                (t1, t2, transID, latency, tries, cname, objname)
+            print "%s %f PUT TransID: %s Latency: %9.6f Tries: %d %s/%s" % \
+                (ptime(t1), t1, transID, latency, tries, cname, objname)
 
         # note the size if the latecy can vary by object size
         if logmask & 1 or (logmask & 4 and latency > sizelat[sizenum]):
@@ -1079,13 +1175,14 @@ def put(connection, instance, donetime, cname, csize, oname, random_flag):
             else:
                 exclogger(text)
 
-    elapsed = time.time() - t0
+    tf = time.time()
+    elapsed = tf - t0
     logger(3, 'Done!  time: %f ops: %d errs: %d' % \
                (elapsed, ops, errs), instance)
     logger(9, '', instance)
 
     return(['put', instance, elapsed, ops, min, max, \
-                tot, errs, lat_dist, latencies, scpu, retries])
+                tot, errs, lat_dist, latencies, scpu, retries, t0, tf])
 
 
 # gets/dels of flat hierarchies are tricky becuase multiple processes can
@@ -1123,6 +1220,11 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
     logger(3, 'cname: %s  oname: %s  gets: %d  now: %d  done: %d' %
            (cname, oname, maxgets, time.time(), donetime), instance)
 
+    if s3:
+        bucket = connection.get_bucket(cname)
+        bucket_key = boto.s3.key.Key(bucket)
+        #print "Found Bucket"
+
     last_size = 0
     while (gets <= maxgets and time.time() < donetime and errs < errmax):
 
@@ -1144,87 +1246,106 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
 
         gets = gets + 1
         t1 = time.time()
-        try:
-            response = {}
-            body = []
-            headers = {}
-            if options.range != '':
-                headers['Range'] = "bytes=%s" % options.range
+        response = {}
+        body = []
+        headers = {}
+        if options.range != '':
+            headers['Range'] = "bytes=%s" % options.range
 
-            if options.extra:
-                headers['X-Trans-Id-Extra'] = options.extra
+        if options.extra:
+            headers['X-Trans-Id-Extra'] = options.extra
 
-            if debug & 2:
-                text = "%s GET CName: %s  OName: %s Inst: %d" % \
-                    (time.strftime('%H:%M:%S'), cname, objname, instance)
-                if options.range != '':
-                    text += " Range: %s" % options.range
-                print text
-
-            headers, body = connection.get_object(cname, objname,
+        if not s3:
+            try:
+                headers, body = connection.get_object(cname, objname,
                                                   headers=headers,
                                                   response_dict=response,
                                                   resp_chunk_size=65536)
-            transID = response['headers']['x-trans-id']
+                transID = response['headers']['x-trans-id']
 
+            except ClientException as err:
+	        if err.http_status == 404 and options.quiton404:
+		    objsize = last_size
+		    gets -= 1
+		    break
 
-        except ClientException as err:
-	    if err.http_status == 404 and options.quiton404:
-		objsize = last_size
-		gets -= 1
-		break
+                errs = errs + 1
+                if err.http_status == 401:
+                    api_error('token expired, retry get', instance, cname, objname, err)
+                    gets -= 1
 
-            errs = errs + 1
-            if err.http_status == 401:
-                api_error('token expired, retry get', instance, cname, objname, err)
-                gets -= 1
-
-                connection = connect(authurl, username, password, osvars, \
+                    connection = connect(authurl, username, password, osvars, \
                                          preauthurl, preauthtoken)
-                if connection == -1:
-                    error('Error: ClientException connect error')
-                preauthtoken = connection.token
+                    if connection == -1:
+                        error('Error: ClientException connect error')
+                    preauthtoken = connection.token
 
-                connection = connect(authurl, username, password, os_vars, \
+                    connection = connect(authurl, username, password, os_vars, \
                                          preauthurl, preauthtoken)
-            else:
-                api_error('get', instance, cname, objname, err, response)
-            continue
+                else:
+                    api_error('get', instance, cname, objname, err, response)
+                continue
 
-        except Exception as err:
-            import traceback
-            logexec('get_object() exception: %s %s' %\
+            except Exception as err:
+                import traceback
+                logexec('get_object() exception: %s %s' %\
                         (err, traceback.format_exc()))
-            logger(9, '', instance)
-            return(['Unexpected Error - get_object() exception: %s' % \
-                        err, instance, 0, 0, 0, 0, 0, 0,
-                        lat_dist, latencies, scpu, 0])
+                logger(9, '', instance)
+                return(['%s Unexpected Error - get_object() exception: %s' % \
+                        (ptime(time.time()), err), instance, 0, 0, 0, 0, 0, 0,
+                        lat_dist, latencies, scpu, 0, 0, 0, 0])
 
-        # continue reading until we have whole object, noting the assumption
-        # if etag checking is fast enough for swift to do all the time, so can I
-        m = md5.new()
-        for chunk in body:
-	    #print "CHUNK:", len(chunk)
-            m.update(chunk)
-            if len(chunk) == 0:
-                break
-            else:
-                objsize += len(chunk)
-	last_size = objsize
+            # continue reading until we have whole object, noting the assumption
+            # if etag checking is fast enough for swift to do all the time, so can I
+            m = md5.new()
+            for chunk in body:
+	        #print "CHUNK:", len(chunk)
+                m.update(chunk)
+                if len(chunk) == 0:
+                    break
+                else:
+                    objsize += len(chunk)
+	    last_size = objsize
+
+        else:
+	    try:
+                transID = ''
+                bucket_key.key = objname
+	        body = bucket_key.get_contents_as_string()
+		objsize = len(body)
+
+            except boto.exception.S3ResponseError as err:
+                if err.status == 404 and options.quiton404:
+                    objsize = last_size
+                    gets -= 1
+                    break
+                else:
+                    errs = errs + 1
+                    api_error('get', instance, cname, objname, err, response)
+
+            except Exception as err:
+                import traceback
+                logexec('s3.get_contents_as_string() exception: %s %s' %\
+                        (err, traceback.format_exc()))
+                logger(9, '', instance)
+                return(['%s Unexpected Error - get_contents_as_string() exception: %s' % \
+                        (ptime(time.time()), err), instance, 0, 0, 0, 0, 0, 0,
+                        lat_dist, latencies, scpu, 0, 0, 0, 0])
 
         ops = ops + 1
         t2 = time.time()
         latency = t2 - t1
         min, max, tot = latcalc(latency, min, max, tot, lat_dist)
         latencies.append(latency)
-        if options.range == '':
+        if not s3 and options.range == '':
             md5check('get', cname, objname, response, m.hexdigest())
 
-        tries = connection.attempts
+        # we subtract 1 from tries so it keeps retries 0 for s3
+        tries = connection.attempts if not s3 else 1
         retries += tries - 1
         if debug & 32:
-            print "GET %f  %f  TransID: %s Latency: %9.6f Tries: %d %s/%s Read: %d" % \
-                (t1, t2, transID, latency, tries, cname, objname, objsize)
+            print "%s %f GET TransID: %s Latency: %9.6f Tries: %d %s/%s Read: %d" % \
+                (ptime(t1), t1, transID, latency, tries, cname, objname, objsize)
 
         if logmask & 1 or (logmask & 4 and latency > sizelat[sizenum]):
             logger(2, "%f  %f  %s  %s/%s" % \
@@ -1242,13 +1363,15 @@ def get(connection, instance, donetime, cname, csize, oname, random_flag):
             else:
                 exclogger(text)
 
-    elapsed = time.time() - t0
+
+    tf = time.time()
+    elapsed = tf - t0
     logger(3, 'Done!  time: %f ops: %d errs: %d' % \
                (elapsed, ops, errs), instance)
     logger(9, '', instance)
 
     return(['get', instance, elapsed, ops, min, max, \
-                tot, errs, lat_dist, latencies, scpu, retries, objsize])
+                tot, errs, lat_dist, latencies, scpu, retries, t0, tf, objsize])
 
 
 def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
@@ -1279,6 +1402,11 @@ def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
     logger(3, 'cname: %s  oname: %s  dels: %d  now: %d  done: %d' %
            (cname, oname, maxdels, time.time(), donetime), instance)
 
+    if s3:
+        bucket = connection.get_bucket(cname)
+        bucket_key = boto.s3.key.Key(bucket)
+        #print "Found Bucket"
+
     while (dels <= maxdels and time.time() < donetime and errs < errmax):
 
         # build object name based on object type and number
@@ -1296,49 +1424,50 @@ def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
 
         dels = dels + 1
         t1 = time.time()
-        try:
-            response = {}
+        response = {}
 
-            if debug & 2:
-                print "%s DEL CName: %s  OName: %s Inst: %d" %\
-                    (time.strftime('%H:%M:%S'), cname, objname, instance)
-
-            connection.delete_object(cname, objname,
+        if not s3:
+            try:
+                connection.delete_object(cname, objname,
                                      response_dict=response)
-            transID = response['headers']['x-trans-id']
+                transID = response['headers']['x-trans-id']
 
-        except ClientException as err:
-	    if err.http_status == 404 and options.quiton404:
-		dels -= 1
-		break
+            except ClientException as err:
+	        if err.http_status == 404 and options.quiton404:
+		    dels -= 1
+		    break
 
-            errs = errs + 1
-            if err.http_status == 401:
-                api_error('token expired, retry del', instance, cname, objname, err)
-                dels -= 1
+                errs = errs + 1
+                if err.http_status == 401:
+                    api_error('token expired, retry del', instance, cname, objname, err)
+                    dels -= 1
                 
-                connection = connect(authurl, username, password, osvars, \
+                    connection = connect(authurl, username, password, osvars, \
                                          preauthurl, preauthtoken)
 
-                if connection == -1:
-                    error('Error: ClientException connect error')
-                preauthtoken = connection.token
+                    if connection == -1:
+                        error('Error: ClientException connect error')
+                    preauthtoken = connection.token
 
-                connection = connect(authurl, username, password, osvars, \
+                    connection = connect(authurl, username, password, osvars, \
                                          preauthurl, preauthtoken)
-            else:
-                api_error('del', instance, cname, objname, err, response)
-            continue
+                else:
+                    api_error('del', instance, cname, objname, err, response)
+                continue
 
-
-        except Exception as err:
-            import traceback
-            logexec('delete_object() exception: %s %s' % \
+            except Exception as err:
+                import traceback
+                logexec('delete_object() exception: %s %s' % \
                         (err, traceback.format_exc()))
-            logger(9, '', instance)
-            return(['Unexpected Error - delete_object() exception: %s' % \
-                        err, instance, 0, 0, 0, 0, 0, 0, \
-                        lat_dist, latencies, scpu, 0])
+                logger(9, '', instance)
+                return(['%s Unexpected Error - delete_object() exception: %s' % \
+                        (ptime(time.time()), err), instance, 0, 0, 0, 0, 0, 0, \
+                        lat_dist, latencies, scpu, 0, 0, 0])
+
+	# as stated in the docs, deleting a non-existing key does NOT throw an error
+	else:
+	    trans_id = ''
+            bucket.delete_key(objname)
 
         ops = ops + 1
         t2 = time.time()
@@ -1346,23 +1475,25 @@ def delobj(connection, instance, donetime, cname, csize, oname, random_flag):
         min, max, tot = latcalc(latency, min, max, tot, lat_dist)
         latencies.append(latency)
 
-        tries = connection.attempts
+        # we subtract 1 from tries so it keeps retries 0 for s3
+        tries = connection.attempts if not s3 else 1
         retries += tries - 1
         if debug & 32:
-            print "%f  %f  TransID: %s Latency: %9.6f  Tries: %d %s/%s" % \
-                (t1, t2, transID, latency, tries, cname, objname)
+            print "%s %f DEL TransID: %s Latency: %9.6f  Tries: %d %s/%s" % \
+                (ptime(t1), t1, transID, latency, tries, cname, objname)
 
         if logmask & 1 or (logmask & 4 and latency > sizelat[sizenum]):
             logger(2, "%f  %f  %s  %s/%s" % \
                        (t1, latency, transID, cname, objname), instance)
 
-    elapsed = time.time() - t0
+    tf = time.time()
+    elapsed = tf - t0
     logger(3, 'Done!  time: %f ops: %d errs: %d' % \
                (elapsed, ops, errs), instance)
     logger(9, '', instance)
 
     return(['del', instance, elapsed, ops, min, max, \
-                tot, errs, lat_dist, latencies, scpu, retries])
+                tot, errs, lat_dist, latencies, scpu, retries, t0, tf])
 
 
 def delcont(connection, cname):
@@ -1371,18 +1502,27 @@ def delcont(connection, cname):
     and NOT a test
     """
 
-    try:
-        connection.delete_container(cname)
-    except ClientException as err:
-        if err.http_status == 409:
-            print "container %s is not empty and so couldn't delete" % cname
-        else:
-            print 'error %d deleting container %s' % (err.http_status, cname)
-    except Exception as err:
-        import traceback
-        logexec('get_object() except: %s %s' % (err, traceback.format_exc()))
-        logger(9, '', instance)
-        print 'Unexpected Error - delete_container() exception: %s' % err
+    if not s3:
+        try:
+            connection.delete_container(cname)
+        except ClientException as err:
+            if err.http_status == 409:
+                print "container %s is not empty and so couldn't delete" % cname
+            else:
+                print 'error %d deleting container %s' % (err.http_status, cname)
+        except Exception as err:
+            import traceback
+            logexec('delete_container() except: %s %s' % (err, traceback.format_exc()))
+            logger(9, '', instance)
+            print '%s Unexpected Error - delete_container() exception: %s' % (ptime(time.time()), err)
+    else:
+	try:
+	    connection.delete_bucket(cname)
+        except boto.exception.S3ResponseError as err:
+            if err.status == 409:
+                print "bucket %s is not empty and so couldn't delete" % cname
+            else:
+                print 'error %d deleting bucket %s' % (err.http_status, cname)
 
 
 def ptime(secs):
@@ -1409,11 +1549,19 @@ def read_stat():
     return(line.rstrip())
 
 
+# Called by Pool for initialization of counter
+def pool_init(args):
+    global counter
+    counter = args
+
+
 def execute_proc(args):
     """
     execute specified test for 1 process
     """
 
+    global counter
+    
     instance = args[0]
     preauthurl = args[1]
     preauthtoken = args[2]
@@ -1443,39 +1591,66 @@ def execute_proc(args):
             print "Proxy Connect, resetting preauthurl to", preauthurl
 
     if debug & 64:
-        print "*** Actual Connect using preauthurl/preauthtokens"
+        print "*** Actual Connect %s" % ("using preauthurl/preauthtokens" if not s3 else '')
     connection = connect(authurl, username, password, osvars, \
                              preauthurl, preauthtoken)
+
+    # connection complete so increment global counter while locked even
+    # if connect() fails otherwise we'll hang waiting for updated value
+    with counter.get_lock():
+	counter.value += 1
+
     if connection == -1:
+        logexec('connection error!')
         return(['Error: ClientException connect error'])
+
+    # wait for counter to be incremented by everyone else to indicate all
+    # threads successfully connected. If we hit hang threshold, give it up
+    # and be sure to pass back 1 extra value since GET includes obj read
     logexec('connected')
+    limit = time.time() + threshold_hang
+    while 1:
+	if counter.value == procs:
+	    break
+        if time.time() > limit:
+	    print "warning: connection time limit reached at", ptime(time.time())
+            lat_dist = []
+            latencies = []
+	    scpu = read_stat()
+            for i in range(11):
+                lat_dist.append(0)
+            return ([test, instance, 0, 0, 0, 0, 0, 0, \
+                               lat_dist, latencies, scpu, 0, 0, 0, 0])
+        time.sleep(.01)
+
+    # connect times are usually pretty fast, but can be longer
+    ctime = time.time()
+
+    sync_it = ctime - test_start
+    if instance == 0 and (sync_it > threshold_conn):
+        print "warning: rank %s process connections sync took %f seconds" % (options.rank, sync_it)
+
+    if debug & 1 and (instance == 0):
+        print "process connections sync took %f seconds" % (ctime - test_start)
+
+    if debug & 2: 
+        print "process %s connection took %f seconds" % (instance, ctime - test_start)
 
     #     D e l a y    U n t i l    s y n c t i m e    i f    s p e c i f i e d
 
     # we only honor --sync for the first of a set of tests
+    # note we only report sync sleeps for instance 0 because we already know
+    # they start pretty close together because of sync above
     if first_test and options.synctime:
-        wait = int(options.synctime) - time.time()
-        if debug & 1:
-            print "Sync: %s Wait: %f" % (options.synctime, wait)
-        if wait > 0:
-            # this is a lot more work than it should be.  it seems that
-            # stalls of more then 10 seconds between the initial connection
-            # and put/get/whatever, cause a 1 second latency.  so until fixed
-            # we neen to make sure we never sleep more than 10 seconds w/o
-            # some activity over the connection
-            while time.time() < int(options.synctime):
-                sleeptime = int(options.synctime) - time.time()
-                if sleeptime > 8:
-                    sleeptime = 8
-                time.sleep(sleeptime)
-
-                # should't take more than a few msec, but we're not
-                # doing anything else at the moment so let's be sure
-                if int(options.synctime) - time.time() > 2:
-                    headers = connection.head_account()
+        sleeptime = int(options.synctime) - time.time()
+	if sleeptime > 0:
+            if debug & 1 and instance == 0:
+	        print "%s sleeping/syncing for %s seconds" % (ptime(time.time()), sleeptime)
+            sleeptime = int(options.synctime) - time.time()
+            time.sleep(sleeptime)
         else:
-            if not options.quiet:
-                print "warning: Sync time passed..."
+            if not options.quiet and instance == 0:
+                print "warning: Sync time passed by %f seconds for %s rank: %s at " % (abs(sleeptime), instance, options.rank, ptime(time.time()))
 
             # if we need to exit on this warning we need to make sure
             # output populated or bad things will happen later
@@ -1484,22 +1659,26 @@ def execute_proc(args):
                 for i in range(11):
                     lat_dist.append(0)
                 return([test, instance, 0, 0, 0, 0, 0, 0, 0, \
-                               lat_dist, read_stat()])
+                               lat_dist, read_stat(), 0, 0, 0, 0, 0])
 
+    # trickier than it seems. if too much of a delay in connections or syntime, we HAVE to base tests on
+    # current time or it may end before it starts
     if options.runtime:
         donetime = time.time() + int(options.runtime)
     else:
         donetime = 9999999999
 
     # turns out that some tests can take longer than the PUT, and since we
-    # want to access all the objects, double our run time which should be
-    # enough time for the other tests to complete
+    # want to access all the objects, give other tests plenty of time
     if re.search('p', options.tests) and test != 'p':
-        donetime *= 2
+        donetime *= 5
 
     #    R u n    1    T e s t
 
-    if debug & 1:
+    if debug & 1 and instance == 0:
+        print "%s starting tests" % ptime(time.time())
+
+    if debug & 2:
         print "Start Test for %s - cname: %s  csize: %d  oname: %s range: %s" % \
             (test, cname, csize, oname, options.range)
 
@@ -1525,7 +1704,10 @@ def execute_proc(args):
     else:
         error("Invalid test: %s" % test)
 
-    if debug & 1:
+    if debug & 1 and instance == 0:
+        print "%s Tests done" % ptime(time.time())
+
+    if debug & 2:
         print "Test done for instance", instance
 
     connection.close()
@@ -1534,7 +1716,7 @@ def execute_proc(args):
 
 
 def print_line(procs, instance, ops, rate, iops, min, max, tot, errs,
-               cpu_percent, lat_dist, median, etime, retries, xfer, mixed_oper, psum_flag=False):
+               cpu_percent, lat_dist, median, etime, retries, xfer, mixed_oper, t0, tf, psum_flag=False):
     """
     print a line of results for one process OR total for all, only printing
     process details when --psum set and print_output tells us to do so
@@ -1598,7 +1780,7 @@ def print_line(procs, instance, ops, rate, iops, min, max, tot, errs,
     if options.rank:
         line += "%-4s " % options.rank
     line += "%-5s %4d %4s %6s  %8s  %8s %8.2f %5d" % \
-        (tname, 1, proc_tot, cvt2KMG(xfer), ptime(stime), ptime(etime), \
+        (tname, 1, proc_tot, cvt2KMG(xfer), ptime(t0), ptime(tf), \
              rate, ops)
     line += "%10.2f %4d %s %7.3f %5.2f-%05.2f" % \
         (iops, errs, latency, median, min, max)
@@ -1704,6 +1886,8 @@ def print_output(results, procs, mixed_oper=''):
     latmin = 999
     latmax = 0
     lat_all = []
+    t0min = time.time()
+    tfmax = 0
     etime = time.time()
     opst = ratet = iopst = retries = 0
     for i in range(procs):
@@ -1724,7 +1908,10 @@ def print_output(results, procs, mixed_oper=''):
 	    bytes_xfer = osize
 
         oper, instance, elapsed, ops, min, max, tot, errs, \
-            lat_dist, latencies, scpu, retries = results[i][0:12]
+            lat_dist, latencies, scpu, retries, t0, tf = results[i][0:14]
+
+        t0min = t0 if t0 < t0min else t0min
+        tfmax = tf if tf > tfmax else tfmax
 
         # combine all latencies into one big array
         lat_all += latencies
@@ -1749,7 +1936,7 @@ def print_output(results, procs, mixed_oper=''):
             print_line(instance, instance, ops, rate, iops, min, max,
                        tot, errs, cpu_percent, lat_dist,
                        median_calc(latencies), etime, retries,
-		       bytes_xfer, mixed_oper, True)
+		       bytes_xfer, mixed_oper, t0, tf, True)
 
         opst += ops
         ratet += rate
@@ -1776,7 +1963,7 @@ def print_output(results, procs, mixed_oper=''):
 
     print_line(procs, instance + 1, opst, ratet, iopst, latmin, latmax,
                lattot, errors, cpu_percent, ldist_tot, median, etime,
-	       retries, bytes_xfer, mixed_oper)
+	       retries, bytes_xfer, mixed_oper, t0min, tfmax)
 
 
 def control_c_handler(signal, frame):
@@ -1884,25 +2071,30 @@ if __name__ == "__main__":
     proxies = []
     preauthurl = ''
     if debug & 64:
+        if not s3:
+            # a lot of extra work but I want to know when proxies are involved
+            header_printed = False
+            for env in os.environ:
+                if re.search('proxy', env):
+                   if not header_printed:
+                        print "*** Proxy environment variables ***"
+                        header_printed = True
+                   print "%s=%s" % (env, os.environ.get(env))
+        print "*** Initial Connect %s" % ("- get preauthtoken/preauthurl" if not s3 else '')
 
-        # a lot of extra work but I want to know when proxies are involved
-        header_printed = False
-        for env in os.environ:
-            if re.search('proxy', env):
-                if not header_printed:
-                    print "*** Proxy environment variables ***"
-                    header_printed = True
-                print "%s=%s" % (env, os.environ.get(env))
-
-        print "*** Initial Connect - get preauthtoken/preauthurl"
     connection = connect(authurl, username, password, osvars)
     if connection == -1:
         error('Error: ClientException connect error')
-    preauthtoken = connection.token
-    preauthurl = connection.url
 
-    if debug & 64:
-        print "  Got - Auth: %s  Url: %s" % (preauthtoken, preauthurl)
+    if not s3:
+        preauthtoken = connection.token
+        preauthurl = connection.url
+        if debug & 64:
+            print "  Got - Auth: %s  Url: %s" % (preauthtoken, preauthurl)
+
+    else:
+        preauthtoken = preauthurl = ''
+
 
     preauthurl = reset_url(preauthurl)
 
@@ -2010,7 +2202,11 @@ if __name__ == "__main__":
  		    else:
 			mixed_test = False
 
-                    # what time with execution actually start?
+		    # save current time this test processing starts so we can
+		    # report offset later, really just for debugging
+		    test_start= time.time()
+
+                    # what time should execution actually start?
                     if options.synctime:
                         stime = int(options.synctime)
                     else:
@@ -2031,8 +2227,11 @@ if __name__ == "__main__":
                             logfiles.append(0)
                             logger(1, test, i - 1, log_time)
 
+                    # Initialize the global process synchronization counter
+                    counter = Value('i', 0)
+
                     jobs = []
-                    pool = Pool(procs)
+                    pool = Pool(procs, initializer=pool_init, initargs=(counter,))
                     inputs = []
                     csize = last_size = 0
                     create_container = 0
@@ -2079,28 +2278,38 @@ if __name__ == "__main__":
                         # noting since they all MUST be the same we need only
                         # look at first instance
                         if inst == 0:
-                            try:
-                                response = {}
-                                headers = connection.head_container(cname)
+			    if not s3:
                                 try:
-                                    cpolicy = headers['x-storage-policy']
-                                except KeyError:    # must be pre-juno swift
-                                    if policy != '':
-                                        text = "this version of swift doesn't "
-                                        text += "support storage policies"
-                                        error(text)
+                                    response = {}
+                                    headers = connection.head_container(cname)
+                                    try:
+                                        cpolicy = headers['x-storage-policy']
+                                    except KeyError:    # must be pre-juno swift
+                                        if policy != '':
+                                            text = "this version of swift doesn't "
+                                            text += "support storage policies"
+                                            error(text)
 
-                            except ClientException as err:
-                                if err.http_status != 404:
-                                    error("Error %s trying to access '%s'" %
-                                          (err.http_status, cname))
+                                except ClientException as err:
+                                    if err.http_status != 404:
+                                        error("Error %s trying to access '%s'" %
+                                              (err.http_status, cname))
 
-                            # if a storage policy specified and the container
-                            # exists, they MUST match
-                            if policy != '' and cpolicy != '' and \
-                                    cpolicy.lower() != policy.lower():
-                                error('container storage policy for %s already set to %s'
-                                      % (cname, cpolicy))
+                                # if a storage policy specified and the container
+                                # exists, they MUST match
+                                if policy != '' and cpolicy != '' and \
+                                        cpolicy.lower() != policy.lower():
+                                    error('container storage policy for %s already set to %s'
+                                          % (cname, cpolicy))
+                            else:
+				try:
+				    connection.get_bucket(cname)
+				    cpolicy = 's3'    # just as long as its not blank
+                                except boto.exception.S3ResponseError as err:
+				    if err.status == 403:
+					error('get_bucket failure: forbidden 403, created by different api?')
+				    elif err.status != 404:
+					error("Unexpected response: %s" % err)
 
                         # make sure container for get/delete tests exist
                         # before proceeding, which means we found cpolicy
@@ -2153,30 +2362,45 @@ if __name__ == "__main__":
                         # AND if a storage policy, set it
                         if test == 'p' and csize == 0:
                             if inst == 0 or options.ctype == 'byproc':
-                                try:
-                                    # in case a lot of containers, stagger
-                                    # creation to be safe, but not too much
-                                    time.sleep(.01)
-                                    logexec('Create container %d' % inst)
-                                    create_container = 1
-                                    headers = {}
-                                    if policy != '':
-                                        headers ['X-Storage-Policy'] = policy
-                                    connection.put_container(cname, headers=headers)
-                                    logexec('container %d created' % inst)
-                                except Exception as err:
-                                    if err.http_status == 409:
-                                        error("Error: 409 Container: %s.  Could be policy mismatch" % cname)
+                                # in case a lot of containers, stagger
+                                # creation to be safe, but not too much
+                                time.sleep(.01)
+                                logexec('Create container %d' % inst)
+                                create_container = 1
+                                headers = {}
+                                if policy != '':
+                                    headers ['X-Storage-Policy'] = policy
+			        if s3:
+				    try:
+				        connection.create_bucket(cname)
+				    except boto.exception.S3ResponseError as err:
+					print "create_bucket failed:", err
+                                    except Exception as err:
+                                        import traceback
+					print ">>>>>>>>>>>><<<<<<<<<<<<<"
+                                        logexec('put_container except: %s %s' % \
+                                                    (err, traceback.format_exc()))
+                                        error('create_bucket error: %s' % err)
 
-                                    match = re.search('Bad Request\s+(.*)', '%s' % err)
-                                    if match:
-                                        error('Bad Request: %s' % match.group(1))
 
-                                    # unexpected error handling...
-                                    import traceback
-                                    logexec('put_container except: %s %s' % \
-                                                (err, traceback.format_exc()))
-                                    error('Error: put_container exc: %s' % err)
+				else:
+				    try:
+                                        connection.put_container(cname, headers=headers)
+                                        logexec('container %d created' % inst)
+                                    except Exception as err:
+				        print "put_container failed:", err
+                                        if err.http_status == 409:
+                                            error("Error: 409 Container: %s.  Could be policy mismatch" % cname)
+
+                                        match = re.search('Bad Request\s+(.*)', '%s' % err)
+                                        if match:
+                                            error('Bad Request: %s' % match.group(1))
+
+                                        # unexpected error handling...
+                                        import traceback
+                                        logexec('put_container except: %s %s' % \
+                                                    (err, traceback.format_exc()))
+                                        error('Error: put_container exc: %s' % err)
 
 			inputs.append([inst, preauthurl, preauthtoken, cname, \
                                            csize, oname, numobj, test, stime])

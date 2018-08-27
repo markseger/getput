@@ -40,6 +40,10 @@ global lock
 global results_fname
 global lat_dist
 
+# note sure how useful this is, but if it takes longer than
+# this to delete containers, issue a warning. totall arbitrary
+# but if we're in the 2 min range it's a long time
+threshold_delete = 120
 
 def logexec(text):
 
@@ -53,6 +57,16 @@ def logexec(text):
 def error(text):
     print text
     sys.exit()
+
+
+def ptime(secs):
+    """
+    convert time in UTC to a string of the form HH:MM:SS
+    """
+
+    string = time.ctime(secs)
+    strings = string.split()
+    return(strings[3])
 
 
 def main(argv):
@@ -147,6 +161,8 @@ def main(argv):
                       help='Let swift client retry on ratelimit hit', action='store_true')
     group2.add_option('--runtime',  dest='runtime',
                       help="runtime in secs")
+    group2.add_option('--s3',  dest='s3',
+                      help="use s3 api", action='store_true')
     group2.add_option('--scheme',  dest='scheme',
                       help="scheme to use")
     group2.add_option('--utc',      dest='utc', action='store_true',
@@ -345,7 +361,7 @@ def build_command(synctime, test, size_index, procs, utc, putcount):
         runtime = int(options.runtime)
     else:
         # give get/del plenty of time to complete
-        runtime = int(options.runtime) * 2
+        runtime = int(options.runtime) * 5
 
     if debug & 128:
         command += " --debug 128"
@@ -395,6 +411,9 @@ def build_command(synctime, test, size_index, procs, utc, putcount):
     if options.runtime:
         command += " --runtime %d" % runtime
 
+    if options.s3:
+        command += " --s3"
+
     if options.scheme:
         command += " --scheme %s" % options.scheme
 
@@ -420,7 +439,7 @@ def execute(queue, command):
         os.remove(errlog)
     except subprocess.CalledProcessError as err:
         print "getput error, see %s for details" % errlog
-        queue.put("unexpected getput error, see %s for details" % errlog)
+        queue.put("unexpected getput error at %s, see %s for details" % (ptime(time.time()), errlog))
         return
 
     # VERY unexepected!!!
@@ -487,7 +506,6 @@ def print_results(queue, putcount):
 
     totals = {}
     ldist_offset = 11 if options.ldist else 0
-    utc_shift = 1 if options.utc else 0
 
     # split line and skip errors (I think)
     # if nothing left when done, THEN it's a serious problem
@@ -538,6 +556,10 @@ def print_results(queue, putcount):
             elif re.match('g\d+', test):
                 test = '2' + test
 
+	    # put tests may include the UCT timestamp which we need to account for
+            # but gets/dels don't
+            utc_shift = 1 if options.utc and re.search('p', test) else 0
+
             if test not in totals:
                 totals[test] = {}
                 totals[test]['procs'] = 0
@@ -569,6 +591,10 @@ def print_results(queue, putcount):
             totals[test]['latency'] += float(fields[11])
             totals[test]['median'] += float(fields[12])
             totals[test]['percent'] += float(fields[ldist_offset + 14])
+
+
+            #print "FIELDS:", fields
+            #print "LOFF: %s UTC: %s" % (ldist_offset, utc_shift)
             totals[test]['retries'] += int(fields[15 + ldist_offset + utc_shift ])
 
             # min/max latency
@@ -639,9 +665,16 @@ def print_results(queue, putcount):
 
 def delcont(cname):
 
+    # make a warning for now...
+    if options.s3:
+        #print "don't know how to delete s3 bucket:", cname
+        return
+
+    # we have to activate venv, if there is one,  before running swift command
     errlog = '/tmp/swiftdel-%s.err' % cname
+    activate = ". %s;" % venv if venv != '' else ''
     insecure = ' --insecure' if options.insecure else ''
-    command = '/bin/bash -c ". %s;  swift delete %s%s" 2>>%s' % (options.creds, cname, insecure, errlog)
+    command = '/bin/bash -c "%s . %s; swift delete %s%s" 2>>%s' % (activate, options.creds, cname, insecure, errlog)
     if debug & 2:
         print "Command:", command
 
@@ -819,6 +852,7 @@ for procs in procset:
 
             # mostly stolen from getput, noting we always use --utc
             if test == 'd' and not options.cont_nodelete:
+		t0 = time.time()
                 for rank in range(len(remote_nodes)):
                     cname = options.cname
                     if options.utc:
@@ -838,5 +872,7 @@ for procs in procset:
                             if debug & 1:
                                 print 'deleting container(s): %s' % name
                             delcont(name)
-
+                delete_time = time.time() - t0
+                if delete_time > threshold_delete:
+                    print "warning: %d seconds to delete all containers" % delete_time
 logexec('exiting cleanly')

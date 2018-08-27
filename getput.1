@@ -24,6 +24,62 @@ It is now known if this will have adverse effects in other environments in the f
 but if you experience weird connection behavior this could be a good place to look
 and possibly try commenting out the the line: os.environ['no_proxy'] = no_proxy
 
+. SH API INTERFACES
+
+When getput was first developed, it interfaced only to swift and used the swift client
+API. Since those days, other object stores such as CEPH also support the Swift Client
+API and the same time Swift has added other API interfaces it supports, such as Amazon
+Cloud's Simply Storage Service also known as S3. To use the S3 API you must first
+install the python boto package which is the common way most applications interface
+to S3 in python.
+
+By Default, getput uses the Swift Client API but when the --s3 switch is included,
+getput uses the Amazon S3 API, which it does via boto.
+
+Throughout the remainder of this manpage
+there are a number of mentions of getput talking to swift and rather than go
+through a major cleanup, suffice it to say when it says this it really means it
+speaks the swift client API. It should also be understood that this interface
+has been tested on both Swift and CEPH and the S3 interface has only been
+tested on CEPH.
+
+.SH AUTHENTICATION
+
+You must have valid credentials to access the Swift or s3 APIs and for the
+swift interface these credentials may be specified in environment variables
+the same way one would specify them for using the swift client utility OR
+simply create a file that can be sourced.  Define them as lines consisting of:
+
+export OS_AUTH_URL=authentication end point
+.br
+export OS_USERNAME=username
+.br
+export OS_PASSWORD=password
+.br
+export OS_TENANT_ID=tenantID
+.br
+export OS_TENANT_NAME=tenantname
+.br
+
+and pass the name of that file to getput using --creds filename.
+One specifies the credentials in a similar way for S3 only in this case
+use the following variable names:
+
+export RGW_ACCESS_ID=access id
+.br
+export RGW_SECRET_KEY=secret key
+.br
+export RGW_HOST=address of RGW host
+.br
+export RGW_PORT=RGW host port
+.br
+
+This file can also be sourced or passed to getput using --creds. Unfortunately there
+is no easy way to test these with boto. Rather one can just try using them and hope
+for the best OR install s3cmd and and configure it to use these credentials, the last
+step of configuration being to test that they work. Once you get them working, you can
+then set them up as described above.
+
 .SH CONTAINER NAME FORMATS
 
 By default, the format of a container is hierarchical, and by that is  meant:
@@ -203,26 +259,6 @@ tests and one for the GETs, named in the form of pX and gY. Though really intend
 more for debugging, if you specify --psum, you'll see an output line for every
 thread in addition to the totals, which may provide further insight into how
 the totals are generated.
-
-.SH AUTHENTICATION
-
-You must have valid credentials to access swift and they may be specified in
-the environment variables the same way one would specify them for using the
-swift client utility OR simply create a file that can be sourced.  Define
-them as lines consisting of:
-
-export OS_AUTH_URL=authentication end point
-.br
-export OS_USERNAME=username
-.br
-export OS_PASSWORD=password
-.br
-export OS_TENANT_ID=tenantID
-.br
-export OS_TENANT_NAME=tenantname
-.br
-
-and pass the name of that file to getput using --creds filename
 
 .SH OPTIONS
 
@@ -572,6 +608,14 @@ connection details.
 
 If you also use --proxies in conjunction with --scheme, those same settings
 will be applied when building the proxy urls as well.
+.RE
+
+.B --s3
+.BR
+Communicate to the object store using S3 credentials. Use of this switch also
+requires the python boto package is installed. Use the command:
+
+pip install boto.
 .RE
 
 .B --sleeps string
